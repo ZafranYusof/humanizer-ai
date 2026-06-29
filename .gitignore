@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.txt
+*.docx
+*.zip
+*.log
+nul
+patches/
+server.log
+debug.log
