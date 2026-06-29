@@ -1239,7 +1239,7 @@ def _burstiness_inject_academic(text):
         is_numbered = bool(re.match(r'^\d+\.\s', sent))
         
         # SKIP fragment injection for numbered items or structured content
-        if not is_structured and not is_numbered and i > 0 and i % 4 == 0 and frag_idx < len(ACADEMIC_FRAGMENTS_SHORT):
+        if not is_structured and not is_numbered and i > 0 and i % 8 == 0 and frag_idx < len(ACADEMIC_FRAGMENTS_SHORT):
             frag = ACADEMIC_FRAGMENTS_SHORT[frag_idx]
             prev_text = result[-1] if result else ''
             prev_is_numbered = bool(re.match(r'^\d+\.\s', prev_text)) if prev_text else False
@@ -1351,7 +1351,7 @@ def _academic_filler_inject(text):
         return text
     
     word_count = len(text.split())
-    num_inserts = max(1, word_count // 150)
+    num_inserts = max(1, word_count // 300)
     # Filter out numbered items from candidates
     candidates = [i for i in range(1, len(sentences) - 1) if not re.match(r'^\d+\.\s', sentences[i].strip())]
     if not candidates:
@@ -1483,6 +1483,85 @@ AVOID_SYNONYMS = {
     "comprehensive": "full", "robust": "solid",
     "paradigm": "approach", "synergy": "fit",
 }
+
+
+
+def protect_citations(text):
+    """Auto-detect and protect academic citations."""
+    citations = []
+    counter = [0]
+    
+    def replace_citation(match):
+        cit = match.group(0)
+        placeholder = f"CIT{counter[0]}"
+        citations.append(cit)
+        counter[0] += 1
+        return placeholder
+    
+    pattern = r'\([A-Z][a-z]+(?:\s+(?:et al\.|&|[A-Z][a-z]+|,))*\s*,\s*(?:19|20)\d{2}(?:\s*,\s*(?:p|pp)\.?\s*\d+)?\)'
+    protected = re.sub(pattern, replace_citation, text)
+    return protected, citations
+
+def restore_citations(text, citations):
+    """Restore protected citations."""
+    for i, cit in enumerate(citations):
+        placeholder = f"CIT{i}"
+        text = text.replace(placeholder, cit)
+    return text
+
+def calc_flesch_kincaid(text):
+    """Calculate Flesch-Kincaid readability score."""
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    words = text.split()
+    syllables = 0
+    for word in words:
+        word = word.lower().strip('.,!?;:')
+        if len(word) <= 3:
+            syllables += 1
+        else:
+            count = 0
+            vowels = 'aeiouy'
+            prev_vowel = False
+            for char in word:
+                is_vowel = char in vowels
+                if is_vowel and not prev_vowel:
+                    count += 1
+                prev_vowel = is_vowel
+            if word.endswith('e') and count > 1:
+                count -= 1
+            syllables += max(1, count)
+    if not sentences or not words:
+        return {'grade': 0, 'reading_ease': 0, 'level': 'N/A'}
+    avg_words = len(words) / len(sentences)
+    avg_syllables = syllables / len(words) if words else 0
+    reading_ease = 206.835 - (1.015 * avg_words) - (84.6 * avg_syllables)
+    grade_level = (0.39 * avg_words) + (11.8 * avg_syllables) - 15.59
+    if reading_ease >= 90: level = 'Very Easy'
+    elif reading_ease >= 80: level = 'Easy'
+    elif reading_ease >= 70: level = 'Fairly Easy'
+    elif reading_ease >= 60: level = 'Standard'
+    elif reading_ease >= 50: level = 'Fairly Difficult'
+    elif reading_ease >= 30: level = 'Difficult'
+    else: level = 'Very Difficult'
+    return {'grade': round(grade_level, 1), 'reading_ease': round(reading_ease, 1), 'level': level}
+
+def check_grammar_languagetool(text):
+    """Check grammar using LanguageTool free API."""
+    try:
+        data = b'text=' + urllib.request.quote(text[:5000]).encode() + b'&language=en-US'
+        req = urllib.request.Request('https://api.languagetool.org/v2/check',
+            data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
+        resp = urllib.request.urlopen(req, timeout=10)
+        result = json.loads(resp.read())
+        matches = result.get('matches', [])
+        issues = []
+        for m in matches[:10]:
+            issues.append({'message': m.get('message', ''), 'offset': m.get('offset', 0), 'length': m.get('length', 0)})
+        return {'issues': issues, 'total': len(matches)}
+    except Exception as e:
+        return {'issues': [], 'total': 0, 'error': str(e)}
+
 
 def apply_custom_avoid(text):
     with open("debug.log", "a") as df:
@@ -2135,6 +2214,10 @@ HTML = r"""<!DOCTYPE html>
     <div class="toolbar">
       <button class="btn-secondary" onclick="runPreview()">Preview (10%)</button>
       <button class="btn-secondary" onclick="checkExternal()">ZeroGPT Check</button>
+      <button class="btn-secondary" onclick="checkGrammar()">Grammar</button>
+      <button class="btn-secondary" onclick="showReadability()">Readability</button>
+      <button class="btn-secondary" onclick="showSettings()">Settings</button>
+      <button class="btn-secondary" onclick="showBatchQueue()">Batch Queue</button>
       <div class="export-btns">
         <button class="btn-secondary" onclick="downloadDocx()">DOCX</button>
         <button class="btn-secondary" onclick="downloadTxt()">TXT</button>
@@ -2194,7 +2277,7 @@ HTML = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <div class="status" id="status">Ready</div>
+    <div class="status" id="status">Ready | Score: <span id="liveScore" style="color:#666;">--</span></div>
     <div class="stats" id="stats"></div>
 
     <div class="heatmap-container" id="heatmapContainer">
@@ -2238,6 +2321,35 @@ utilize"></textarea>
         <button class="btn-secondary" onclick="toggleDiff()" style="padding:6px 12px;font-size:12px;">Toggle View</button>
       </div>
       <div class="diff-body" id="diffBody"></div>
+    </div>
+
+
+    <div id="batchPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Batch Queue</h3>
+      <div id="batchList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">No files queued</div>
+      <button class="btn-primary" onclick="processBatch()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Process All</button>
+    </div>
+    <div id="settingsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Settings</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label style="font-size:11px;color:#888;">Chunk Size</label><input type="number" id="chunkSize" value="400" min="100" max="1000" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
+        <div><label style="font-size:11px;color:#888;">Overlap</label><input type="number" id="overlap" value="2" min="0" max="5" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
+        <div><label style="font-size:11px;color:#888;">Parallel</label><input type="number" id="parallel" value="4" min="1" max="8" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
+        <div><label style="font-size:11px;color:#888;">Creativity</label><input type="number" id="creativity" value="0.6" min="0.1" max="1.0" step="0.1" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
+      </div>
+      <div style="margin-top:12px;">
+        <label style="font-size:11px;color:#888;"><input type="checkbox" id="strictWordCount"> Strict word count (+-5%)</label><br>
+        <label style="font-size:11px;color:#888;"><input type="checkbox" id="autoRetry"> Auto-retry if score > 40</label>
+      </div>
+      <button class="btn-primary" onclick="saveSettings()" style="margin-top:12px;padding:8px 16px;font-size:12px;">Save</button>
+    </div>
+    <div id="grammarPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Grammar Check</h3>
+      <div id="grammarResults" style="font-size:12px;color:#aaa;">Click Grammar to check...</div>
+    </div>
+    <div id="readabilityPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Readability</h3>
+      <div id="readabilityResults" style="font-size:12px;color:#aaa;">Click Readability to analyze...</div>
     </div>
   </div>
 </div>
@@ -2703,6 +2815,8 @@ async function loadVersion(id) {
 document.addEventListener('DOMContentLoaded', () => {
   loadHistory();
   loadVersions();
+  loadSettings();
+  setupRealTimeDetection();
   const zone = document.getElementById('uploadZone');
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.style.borderColor = '#00cc88'; });
   zone.addEventListener('dragleave', () => { zone.style.borderColor = '#333'; });
