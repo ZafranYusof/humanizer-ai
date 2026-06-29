@@ -2218,6 +2218,7 @@ HTML = r"""<!DOCTYPE html>
       <button class="btn-secondary" onclick="showReadability()">Readability</button>
       <button class="btn-secondary" onclick="showSettings()">Settings</button>
       <button class="btn-secondary" onclick="showBatchQueue()">Batch Queue</button>
+      <button class="btn-secondary" onclick="showApiManager()">API Keys</button>
       <div class="export-btns">
         <button class="btn-secondary" onclick="downloadDocx()">DOCX</button>
         <button class="btn-secondary" onclick="downloadTxt()">TXT</button>
@@ -2324,6 +2325,16 @@ utilize"></textarea>
     </div>
 
 
+
+    <div id="apiPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">API Provider Management</h3>
+      <div style="margin-bottom:12px;">
+        <input type="text" id="providerName" placeholder="Provider name (e.g., openai)" style="width:30%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;margin-right:8px;">
+        <input type="text" id="apiKey" placeholder="API key" style="width:40%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;margin-right:8px;">
+        <button class="btn-primary" onclick="addProvider()" style="padding:8px 16px;font-size:12px;">Add</button>
+      </div>
+      <div id="providerList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">Loading...</div>
+    </div>
     <div id="batchPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
       <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Batch Queue</h3>
       <div id="batchList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">No files queued</div>
@@ -2410,7 +2421,16 @@ async function humanize() {
     const startResp = await fetch('/api/humanize', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text: input, passes: passes, model: model, tone: tone, domain: document.getElementById('domain').value, ref_sample: document.getElementById('refSample').value})
+      body: JSON.stringify({
+        text: input, 
+        passes: passes, 
+        model: model, 
+        tone: tone, 
+        domain: document.getElementById('domain').value, 
+        ref_sample: document.getElementById('refSample').value,
+        autoRetry: document.getElementById('autoRetry')?.checked || false,
+        strictWordCount: document.getElementById('strictWordCount')?.checked || false
+      })
     });
     const startData = await startResp.json();
     if (startData.error) {
@@ -3015,8 +3035,19 @@ class Handler(BaseHTTPRequestHandler):
                 elapsed = round(time.time() - t0, 1)
                 output_score = calc_detection_score(result)
 
+                # Strict word count enforcement (±5%)
+                strict_wc = text_params.get('strictWordCount', False)
+                if strict_wc and input_words > 0:
+                    out_words = len(result.split())
+                    ratio = out_words / input_words
+                    if ratio < 0.95 or ratio > 1.05:
+                        # Re-process problematic chunks
+                        result = humanize_chunk(result, 1, model, tone)
+                
                 with JOBS_LOCK:
+                
                     JOBS[job_id].update({
+                        
                         "status": "done",
                         "progress": 100,
                         "chunks_done": 1,
@@ -3423,6 +3454,14 @@ class Handler(BaseHTTPRequestHandler):
             
             in_score = calc_detection_score(preview_text)
             out_score = calc_detection_score(result)
+            
+            # Auto-retry if score still high
+            auto_retry = body.get('autoRetry', False)
+            retry_count = 0
+            while auto_retry and out_score.get('score', 100) > 40 and retry_count < 2:
+                retry_count += 1
+                result = humanize_chunk(result, passes, model, tone)
+                out_score = calc_detection_score(result)
             
             self._json_response({
                 "preview_input": preview_text,
