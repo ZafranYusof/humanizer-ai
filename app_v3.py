@@ -23,11 +23,9 @@ from textwrap import dedent
 from datetime import datetime
 
 # ─── Config ───────────────────────────────────────────────────────────
-import os
-LLM_BASE = os.environ.get("LLM_BASE", "http://localhost:20128/v1")
-LLM_KEY = os.environ.get("LLM_KEY", "123456")
-LLM_MODEL = os.environ.get("LLM_MODEL", "cx/gpt-5.5")
-PORT = int(os.environ.get("PORT", 7860))
+LLM_BASE = "http://localhost:20128/v1"
+LLM_KEY = "123456"
+LLM_MODEL = "cx/gpt-5.5"
 
 MODEL_OPTIONS = {
     "cx/gpt-5.5": "Recommended (GPT-5.5, best quality+length)",
@@ -43,36 +41,10 @@ MODEL_OPTIONS = {
 # New feature configs
 MULTI_MODEL = False  # smart routing: use single fast model for all passes
 AUTO_RETRY = True   # re-process if score still > 40
-CHUNK_SIZE = 400    # bigger chunks = fewer chunks, better context, less overlap waste
+CHUNK_SIZE = 150    # smaller chunks = faster LLM response, less compression
 MIN_LENGTH_RATIO = 0.80
 PARALLEL_CHUNKS = 4  # max concurrent chunk workers
 HISTORY = []  # in-memory history, max 10
-# Full-result cache (same input = instant output)
-RESULT_CACHE = {}  # {key: {output, score, input_words, timestamp}}
-RESULT_CACHE_MAX = 50
-RESULT_CACHE_TTL = 86400  # 24 hours
-
-def _result_cache_key(text, model, tone, passes):
-    import hashlib
-    key_str = f"{text[:1000]}|{model}|{tone}|{passes}"
-    return hashlib.md5(key_str.encode()).hexdigest()
-
-def result_cache_get(key):
-    if key in RESULT_CACHE:
-        entry = RESULT_CACHE[key]
-        if time.time() - entry['timestamp'] < RESULT_CACHE_TTL:
-            return entry
-    return None
-
-def result_cache_set(key, output, score, input_words):
-    if len(RESULT_CACHE) >= RESULT_CACHE_MAX:
-        oldest = min(RESULT_CACHE.items(), key=lambda x: x[1]['timestamp'])
-        del RESULT_CACHE[oldest[0]]
-    RESULT_CACHE[key] = {
-        'output': output, 'score': score,
-        'input_words': input_words, 'timestamp': time.time()
-    }
-
 
 TONE_PRESETS = {
     "academic": "Maintain formal tone but sound human. Use minimal contractions. Add phrases like 'it appears that', 'the evidence suggests', 'one could argue'. Avoid slang.",
@@ -175,7 +147,7 @@ def llm_call(prompt, system="", temperature=0.9, model=None):
         "model": model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": 8192,
+        "max_tokens": 4096,
         "stream": False,
     }
 
@@ -216,27 +188,6 @@ def llm_call(prompt, system="", temperature=0.9, model=None):
                 error_body = str(e)
         raise RuntimeError(f"LLM returned {e.code}: {error_body[:300] if error_body else 'Bad Request'}")
 
-
-
-# ─── LLM Response Cache ─────────────────────────────────────────────
-import hashlib
-_LLM_CACHE = {}
-_LLM_CACHE_HITS = 0
-_LLM_CACHE_MISSES = 0
-
-def cached_llm_call(prompt, system="", temperature=0.9, model=None):
-    """LLM call with hash-based caching. Same input = cached result."""
-    global _LLM_CACHE, _LLM_CACHE_HITS, _LLM_CACHE_MISSES
-    # Use only user prompt for cache key (system prompt changes with word counts)
-    cache_key = hashlib.md5(f"{model}:{temperature}:{prompt[:1000]}".encode()).hexdigest()
-    if cache_key in _LLM_CACHE:
-        _LLM_CACHE_HITS += 1
-        return _LLM_CACHE[cache_key]
-    _LLM_CACHE_MISSES += 1
-    result = llm_call(prompt, system=system, temperature=temperature, model=model)
-    if result and len(result) > 50:
-        _LLM_CACHE[cache_key] = result
-    return result
 
 # ─── Pass 1: Structure rewrite ────────────────────────────────────────
 
@@ -290,7 +241,7 @@ NEVER: summarize, compress, remove details, add new information, use "delve", "l
 
 Output ONLY the rewritten text. No explanations, no notes, no meta-commentary."""
 
-    return cached_llm_call(text, system=system, temperature=0.65 if tone == "academic" else 0.70, model=model)
+    return llm_call(text, system=system, temperature=0.65 if tone == "academic" else 0.70, model=model)
 
 
 # ─── Pass 2: Burstiness injection ────────────────────────────────────
@@ -324,7 +275,7 @@ Make these specific changes:
 
 Keep all facts intact. Output ONLY the edited text."""
 
-    return cached_llm_call(text, system=system, temperature=0.85 if tone == "academic" else 0.95, model=model)
+    return llm_call(text, system=system, temperature=0.85 if tone == "academic" else 0.95, model=model)
 
 
 # ─── Pass 3: Final polish ─────────────────────────────────────────────
@@ -357,7 +308,7 @@ Scan for and fix:
 
 Output ONLY the final polished text. No notes or explanations."""
 
-    return cached_llm_call(text, system=system, temperature=0.55 if tone == "academic" else 0.60, model=model)
+    return llm_call(text, system=system, temperature=0.55 if tone == "academic" else 0.60, model=model)
 
 
 # ─── Post-processing ─────────────────────────────────────────────────
@@ -1265,7 +1216,7 @@ def _burstiness_inject_academic(text):
         is_numbered = bool(re.match(r'^\d+\.\s', sent))
         
         # SKIP fragment injection for numbered items or structured content
-        if not is_structured and not is_numbered and i > 0 and i % 8 == 0 and frag_idx < len(ACADEMIC_FRAGMENTS_SHORT):
+        if not is_structured and not is_numbered and i > 0 and i % 4 == 0 and frag_idx < len(ACADEMIC_FRAGMENTS_SHORT):
             frag = ACADEMIC_FRAGMENTS_SHORT[frag_idx]
             prev_text = result[-1] if result else ''
             prev_is_numbered = bool(re.match(r'^\d+\.\s', prev_text)) if prev_text else False
@@ -1377,7 +1328,7 @@ def _academic_filler_inject(text):
         return text
     
     word_count = len(text.split())
-    num_inserts = max(1, word_count // 300)
+    num_inserts = max(1, word_count // 150)
     # Filter out numbered items from candidates
     candidates = [i for i in range(1, len(sentences) - 1) if not re.match(r'^\d+\.\s', sentences[i].strip())]
     if not candidates:
@@ -1420,191 +1371,11 @@ def _academic_ultra_short_inject(text):
 
 
 
-
-
-# ─── Processing Stats ───────────────────────────────────────────────
-STATS = {
-    "total_jobs": 0,
-    "total_input_words": 0,
-    "total_output_words": 0,
-    "total_time_seconds": 0,
-    "models_used": {},
-    "success_count": 0,
-    "error_count": 0,
-    "cache_hits": 0,
-    "cache_misses": 0,
-}
-
-def update_stats(job_result):
-    STATS["total_jobs"] += 1
-    STATS["total_input_words"] += job_result.get("input_words", 0)
-    STATS["total_output_words"] += job_result.get("output_words", 0)
-    STATS["total_time_seconds"] += job_result.get("time", 0)
-    model = job_result.get("model", "unknown")
-    STATS["models_used"][model] = STATS["models_used"].get(model, 0) + 1
-    if job_result.get("status") == "done":
-        STATS["success_count"] += 1
-    else:
-        STATS["error_count"] += 1
-    STATS["cache_hits"] = _LLM_CACHE_HITS
-    STATS["cache_misses"] = _LLM_CACHE_MISSES
-
-# ─── Version History (Undo) ─────────────────────────────────────────
-VERSIONS = []  # [{id, timestamp, input_words, output_words, text, score}]
-MAX_VERSIONS = 10
-
-def save_version(entry):
-    VERSIONS.insert(0, entry)
-    if len(VERSIONS) > MAX_VERSIONS:
-        VERSIONS.pop()
-
-# ─── Custom Word Lists ──────────────────────────────────────────────
-CUSTOM_PRESERVE = set()  # User-defined words to never modify
-CUSTOM_AVOID = set()     # User-defined words to always replace
-
-def load_custom_lists(preserve_list="", avoid_list=""):
-    global CUSTOM_PRESERVE, CUSTOM_AVOID
-    if preserve_list:
-        items = preserve_list.replace(",", chr(10)).split(chr(10))
-        CUSTOM_PRESERVE = set(w.strip() for w in items if w.strip())
-    if avoid_list:
-        items = avoid_list.replace(",", chr(10)).split(chr(10))
-        CUSTOM_AVOID = set(w.strip().lower() for w in items if w.strip())
-
-_PRESERVE_PLACEHOLDERS = {}
-
-def apply_custom_preserve(text):
-    """Lock custom preserve words with Unicode PUA before LLM processing."""
-    global _PRESERVE_PLACEHOLDERS
-    _PRESERVE_PLACEHOLDERS = {}
-    if not CUSTOM_PRESERVE:
-        return text
-    counter = 0xE100  # Different PUA range from citations
-    for word in CUSTOM_PRESERVE:
-        if counter > 0xE1FF:
-            break
-        pat = re.compile(r'\b' + re.escape(word) + r'\b', re.IGNORECASE)
-        key = chr(counter)
-        _PRESERVE_PLACEHOLDERS[key] = word
-        text = pat.sub(f"\u200B{key}\u200B", text)
-        counter += 1
-    return text
-
-def restore_custom_preserve(text):
-    """Restore custom preserve words from Unicode PUA placeholders."""
-    for key, original in _PRESERVE_PLACEHOLDERS.items():
-        text = text.replace(f"\u200B{key}\u200B", original)
-        text = text.replace(key, original)
-    return text
-
-AVOID_SYNONYMS = {
-    "utilizes": "uses", "utilize": "use",
-    "methodologies": "methods", "methodology": "method",
-    "optimize": "improve", "optimizes": "improves",
-    "delve": "look", "delves": "looks",
-    "furthermore": "also", "moreover": "also", "additionally": "also",
-    "nevertheless": "still", "consequently": "so", "subsequently": "then",
-    "facilitate": "help", "facilitates": "helps",
-    "leverage": "use", "leverages": "uses",
-    "comprehensive": "full", "robust": "solid",
-    "paradigm": "approach", "synergy": "fit",
-}
-
-
-
-def protect_citations(text):
-    """Auto-detect and protect academic citations."""
-    citations = []
-    counter = [0]
-    
-    def replace_citation(match):
-        cit = match.group(0)
-        placeholder = f"CIT{counter[0]}"
-        citations.append(cit)
-        counter[0] += 1
-        return placeholder
-    
-    pattern = r'\([A-Z][a-z]+(?:\s+(?:et al\.|&|[A-Z][a-z]+|,))*\s*,\s*(?:19|20)\d{2}(?:\s*,\s*(?:p|pp)\.?\s*\d+)?\)'
-    protected = re.sub(pattern, replace_citation, text)
-    return protected, citations
-
-def restore_citations(text, citations):
-    """Restore protected citations."""
-    for i, cit in enumerate(citations):
-        placeholder = f"CIT{i}"
-        text = text.replace(placeholder, cit)
-    return text
-
-def calc_flesch_kincaid(text):
-    """Calculate Flesch-Kincaid readability score."""
-    sentences = re.split(r'[.!?]+', text)
-    sentences = [s.strip() for s in sentences if s.strip()]
-    words = text.split()
-    syllables = 0
-    for word in words:
-        word = word.lower().strip('.,!?;:')
-        if len(word) <= 3:
-            syllables += 1
-        else:
-            count = 0
-            vowels = 'aeiouy'
-            prev_vowel = False
-            for char in word:
-                is_vowel = char in vowels
-                if is_vowel and not prev_vowel:
-                    count += 1
-                prev_vowel = is_vowel
-            if word.endswith('e') and count > 1:
-                count -= 1
-            syllables += max(1, count)
-    if not sentences or not words:
-        return {'grade': 0, 'reading_ease': 0, 'level': 'N/A'}
-    avg_words = len(words) / len(sentences)
-    avg_syllables = syllables / len(words) if words else 0
-    reading_ease = 206.835 - (1.015 * avg_words) - (84.6 * avg_syllables)
-    grade_level = (0.39 * avg_words) + (11.8 * avg_syllables) - 15.59
-    if reading_ease >= 90: level = 'Very Easy'
-    elif reading_ease >= 80: level = 'Easy'
-    elif reading_ease >= 70: level = 'Fairly Easy'
-    elif reading_ease >= 60: level = 'Standard'
-    elif reading_ease >= 50: level = 'Fairly Difficult'
-    elif reading_ease >= 30: level = 'Difficult'
-    else: level = 'Very Difficult'
-    return {'grade': round(grade_level, 1), 'reading_ease': round(reading_ease, 1), 'level': level}
-
-def check_grammar_languagetool(text):
-    """Check grammar using LanguageTool free API."""
-    try:
-        data = b'text=' + urllib.request.quote(text[:5000]).encode() + b'&language=en-US'
-        req = urllib.request.Request('https://api.languagetool.org/v2/check',
-            data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'})
-        resp = urllib.request.urlopen(req, timeout=10)
-        result = json.loads(resp.read())
-        matches = result.get('matches', [])
-        issues = []
-        for m in matches[:10]:
-            issues.append({'message': m.get('message', ''), 'offset': m.get('offset', 0), 'length': m.get('length', 0)})
-        return {'issues': issues, 'total': len(matches)}
-    except Exception as e:
-        return {'issues': [], 'total': 0, 'error': str(e)}
-
-
-def apply_custom_avoid(text):
-    with open("debug.log", "a") as df:
-        df.write(f"[AVOID] called with CUSTOM_AVOID={CUSTOM_AVOID}, text={text[:60]}" + chr(10))
-    if not CUSTOM_AVOID:
-        return text
-    for word in CUSTOM_AVOID:
-        replacement = AVOID_SYNONYMS.get(word, word)
-        pat = re.compile(chr(92)+"b" + re.escape(word) + chr(92)+"b", re.IGNORECASE)
-        text = pat.sub(replacement, text)
-    return text
-
 # ─── Citation/Reference Protection ───────────────────────────────────
 
 CITATION_PATTERNS = [
     (r'\[(?:[A-Z][a-z]+(?:\s+(?:et al\.?|&\s+[A-Z][a-z]+))?,\s*\d{4})\]', 'CITE'),
-    (r'\([A-Z][a-z]+(?:\s+(?:et al\.?|&\s+[A-Z][a-z]+))?,\s*\d{4}(?:\s*,\s*(?:p|pp)\.?\s*\d+)?\)', 'CITE'),
+    (r'\((?:[A-Z][a-z]+(?:\s+(?:et al\.?|&\s+[A-Z][a-z]+))?,\s*\d{4})\)', 'CITE'),
     (r'\b(Figure|Table|Section|Fig\.|Tbl\.|Sec\.|Equation|Eq\.|Appendix|App\.|Chapter|Ch\.)\s+\d+(?:\.\d+)*\b', 'REF'),
     (r'\[\d+(?:[,-]\s*\d+)*\]', 'CITNUM'),
     (r'doi[:\.]?\s*10\.\d{4,}/\S+', 'DOI'),
@@ -1833,21 +1604,17 @@ def feedback_retry(result_text, original_chunks, passes, model, tone, max_retrie
 # ─── Chunking ──────────────────────────────────────────────────────────
 
 def split_into_chunks(text, max_words=250):
-    """Split text into chunks with sentence overlap at boundaries for citation preservation."""
+    """Split text into chunks at sentence boundaries, max ~max_words each."""
     sentences = re.split(r'(?<=[.!?])\s+', text)
     chunks = []
     current = []
     current_words = 0
-    overlap_sentences = 2  # reduced overlap for efficiency
-    
-    for i, sent in enumerate(sentences):
+    for sent in sentences:
         sw = len(sent.split())
         if current_words + sw > max_words and current:
             chunks.append(' '.join(current))
-            # Overlap: carry last 2-3 sentences into next chunk
-            overlap = current[-min(overlap_sentences, len(current)):]
-            current = list(overlap) + [sent]
-            current_words = sum(len(s.split()) for s in current)
+            current = [sent]
+            current_words = sw
         else:
             current.append(sent)
             current_words += sw
@@ -1856,133 +1623,33 @@ def split_into_chunks(text, max_words=250):
     return chunks
 
 
-def deduplicate_overlaps(chunks_text):
-    """Remove duplicate sentences from overlapping chunks."""
-    if len(chunks_text) < 2:
-        return chunks_text
-    
-    result = [chunks_text[0]]
-    for i in range(1, len(chunks_text)):
-        prev_sentences = set()
-        for s in re.split(r'(?<=[.!?])\s+', chunks_text[i-1]):
-            s_clean = s.strip().lower()
-            if len(s_clean) > 10:
-                prev_sentences.add(s_clean)
-        
-        current_sentences = re.split(r'(?<=[.!?])\s+', chunks_text[i])
-        deduped = []
-        for s in current_sentences:
-            s_clean = s.strip().lower()
-            if s_clean and len(s_clean) > 10 and s_clean in prev_sentences:
-                continue
-            deduped.append(s)
-        
-        if deduped:
-            result.append(' '.join(deduped))
-        else:
-            result.append(chunks_text[i])
-    
-    return result
-
-
-MODEL_FALLBACK_CHAIN = [
-    "cx/gpt-5.5",
-    "cx/gpt-5.4",
-    "cx/gpt-5.4-mini",
-    "ag/gemini-3-flash",
-    "ag/gemini-3.5-flash-low",
-]
-
-def check_output_quality(original, result):
-    """Detect garbage output: severe compression, word counting, hallucination."""
-    if not result or not result.strip():
-        return False, "empty output"
-    
-    orig_words = len(original.split())
-    result_words = len(result.split())
-    
-    # Severe compression (< 40% of original)
-    if orig_words > 20 and result_words < orig_words * 0.4:
-        return False, f"severe compression ({result_words}/{orig_words} words)"
-    
-    # Word counting garbage
-    garbage_patterns = [
-        r'\(1\)\s*2\.', r'\(2\)\s*3\.', r'Significant expansion \(\d+\)',
-        r'input text missing', r"can't edit empty", r'Send text\.',
-        r'Word count:\s*\d+', r'Output words:',
-    ]
-    for pat in garbage_patterns:
-        if re.search(pat, result, re.I):
-            return False, f"garbage pattern: {pat}"
-    
-    # Hallucination: completely different vocabulary
-    orig_words_set = set(w.lower() for w in original.split() if len(w) > 5)
-    result_words_set = set(w.lower() for w in result.split() if len(w) > 5)
-    if orig_words_set:
-        overlap = len(orig_words_set & result_words_set) / len(orig_words_set)
-        if overlap < 0.1:  # less than 10% vocabulary overlap
-            return False, f"hallucination (only {overlap:.0%} vocab overlap)"
-    
-    return True, "ok"
-
-
 def humanize_chunk(chunk, passes, model, tone="casual"):
-    """Humanize a single chunk with quality gate and model fallback."""
+    """Humanize a single chunk through all passes. Single fast model for speed."""
+    # Lock citations/references before LLM processing
     locked_chunk, placeholders = _lock_citations(chunk)
-    locked_chunk = apply_custom_preserve(locked_chunk)
-    
-    models_to_try = [model] if model else [LLM_MODEL]
-    for fb in MODEL_FALLBACK_CHAIN:
-        if fb not in models_to_try:
-            models_to_try.append(fb)
-    
-    result = None
-    used_model = models_to_try[0]
-    
-    for try_model in models_to_try[:3]:
-        try:
-            candidate = pass1_rewrite(locked_chunk, model=try_model, tone=tone)
-            if not candidate or not candidate.strip():
-                continue
-            
-            ok, reason = check_output_quality(locked_chunk, candidate)
-            if not ok:
-                print(f"[quality] {try_model} failed: {reason}, trying next", flush=True)
-                continue
-            
-            result = candidate
-            used_model = try_model
-            break
-        except Exception as e:
-            print(f"[fallback] {try_model} error: {e}", flush=True)
-            continue
-    
+    tone_hint = TONE_PRESETS.get(tone, TONE_PRESETS["casual"])
+    result = pass1_rewrite(locked_chunk, model=model, tone=tone)
     if not result or not result.strip():
-        with open("debug.log", "a") as df:
-            df.write(f"[EARLY] No result from LLM, returning original chunk" + chr(10))
-        return _unlock_citations(chunk, placeholders)
-    
+        result = pass1_rewrite(chunk, model=model, tone=tone)
+    if not result or not result.strip():
+        return chunk  # fallback to original
+
     if passes >= 2:
-        temp = pass2_burstiness(result, model=used_model, tone=tone)
+        temp = pass2_burstiness(result, model=model, tone=tone)
         if not temp or not temp.strip():
-            temp = pass2_burstiness(result, model=used_model, tone=tone)
+            temp = pass2_burstiness(result, model=model, tone=tone)
         if temp and temp.strip():
             result = temp
 
     if passes >= 3:
-        temp = pass3_polish(result, model=used_model, tone=tone)
+        temp = pass3_polish(result, model=model, tone=tone)
         if not temp or not temp.strip():
-            temp = pass3_polish(result, model=used_model, tone=tone)
+            temp = pass3_polish(result, model=model, tone=tone)
         if temp and temp.strip():
             result = temp
 
+    # Unlock citations/references
     result = _unlock_citations(result, placeholders)
-    if CUSTOM_AVOID:
-        print(f"[DEBUG] apply_custom_avoid: CUSTOM_AVOID={CUSTOM_AVOID}, before={result[:80]}", flush=True)
-    result = apply_custom_avoid(result)
-    if CUSTOM_PRESERVE:
-        print(f"[DEBUG] restore_custom_preserve: CUSTOM_PRESERVE={CUSTOM_PRESERVE}", flush=True)
-    result = restore_custom_preserve(result)
     return result
 
 
@@ -2073,7 +1740,6 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
         progress_cb(total_chunks, total_chunks, "done")
 
     # Smooth transitions between chunks (Feature 8)
-    processed_chunks = deduplicate_overlaps(processed_chunks)
     result = smooth_transitions(processed_chunks, tone=tone)
 
     # Final pass - tone-aware
@@ -2097,335 +1763,17 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
                 processed = humanize_chunk(chunks[idx], passes, model, tone)
                 processed = advanced_post_process(processed, tone=tone)
                 processed_chunks[idx] = processed
-            processed_chunks = deduplicate_overlaps(processed_chunks)
-    result = smooth_transitions(processed_chunks, tone=tone)
-    if tone != "academic":
+            result = smooth_transitions(processed_chunks, tone=tone)
+            if tone != "academic":
                 result = ultra_short_inject(result)
-    result = paragraph_vary(result)
-    result = re.sub(r'  +', ' ', result)
-    result = re.sub(r'\.\s*\.', '.', result)
+            result = paragraph_vary(result)
+            result = re.sub(r'  +', ' ', result)
+            result = re.sub(r'\.\s*\.', '.', result)
 
     # New: Paragraph-level feedback retry
     result = feedback_retry(result, chunks, passes, model or LLM_MODEL, tone)
 
     return result
-
-
-# ─── Feature: Output Variants (generate 3, pick best) ────────────────
-
-def humanize_variants(text, passes=3, model=None, tone="casual", num_variants=3, progress_cb=None):
-    """Generate multiple variants, return all + best (lowest AI score)."""
-    if model is None:
-        model = LLM_MODEL
-    variants = []
-    for i in range(num_variants):
-        if progress_cb:
-            progress_cb(i, num_variants, f"variant_{i+1}")
-        result = humanize(text, passes=passes, model=model, tone=tone)
-        score = calc_detection_score(result)
-        variants.append({
-            "text": result,
-            "score": score["score"],
-            "grade": score["grade"],
-            "words": len(result.split()),
-            "variant": i + 1,
-        })
-    variants.sort(key=lambda v: v["score"])
-    best = variants[0]
-    if progress_cb:
-        progress_cb(num_variants, num_variants, "done")
-    return {"variants": variants, "best": best}
-
-
-# ─── Feature: Full-text Cache ────────────────────────────────────────
-
-_FULL_TEXT_CACHE = {}
-MAX_CACHE_ENTRIES = 50
-
-def fulltext_cache_get(text_hash):
-    return _FULL_TEXT_CACHE.get(text_hash)
-
-def fulltext_cache_set(text_hash, result_data):
-    global _FULL_TEXT_CACHE
-    if len(_FULL_TEXT_CACHE) >= MAX_CACHE_ENTRIES:
-        oldest_key = next(iter(_FULL_TEXT_CACHE))
-        del _FULL_TEXT_CACHE[oldest_key]
-    _FULL_TEXT_CACHE[text_hash] = result_data
-
-def make_text_hash(text, passes, model, tone):
-    key = f"{text[:2000]}|{passes}|{model}|{tone}"
-    return hashlib.md5(key.encode()).hexdigest()
-
-
-# ─── Feature: Time Estimation ────────────────────────────────────────
-
-MODEL_AVG_TIMES = {
-    "cx/gpt-5.5": 12,
-    "ag/claude-sonnet-4-6": 10,
-    "ag/gemini-3-flash": 5,
-    "ag/gemini-3.5-flash-low": 3,
-    "ag/gpt-oss-120b-medium": 8,
-    "ag/claude-opus-4-6-thinking": 25,
-    "cx/gpt-5.4": 8,
-    "cx/gpt-5.4-mini": 4,
-}
-
-def estimate_time_remaining(input_words, chunks_total, chunks_done, elapsed_so_far, model=None):
-    if chunks_done <= 0 or elapsed_so_far <= 0:
-        model_time = MODEL_AVG_TIMES.get(model or LLM_MODEL, 10)
-        total_est = (input_words / 300) * model_time * 3
-        return {"total_seconds": round(total_est), "remaining_seconds": round(total_est), "elapsed_seconds": 0}
-    avg_chunk_time = elapsed_so_far / chunks_done
-    remaining_chunks = chunks_total - chunks_done
-    remaining_seconds = round(remaining_chunks * avg_chunk_time * 1.1)
-    total_seconds = round(elapsed_so_far + remaining_seconds)
-    return {
-        "total_seconds": total_seconds,
-        "remaining_seconds": remaining_seconds,
-        "elapsed_seconds": round(elapsed_so_far),
-        "avg_chunk_time": round(avg_chunk_time, 1),
-    }
-
-def format_time_remaining(seconds):
-    if seconds <= 0:
-        return "Almost done..."
-    if seconds < 60:
-        return f"{seconds}s left"
-    minutes = seconds // 60
-    secs = seconds % 60
-    if minutes < 60:
-        return f"{minutes} min {secs}s left"
-    hours = minutes // 60
-    mins = minutes % 60
-    return f"{hours}h {mins}m left"
-
-
-# ─── Feature: Tone Slider (1-10 casual to formal) ───────────────────
-
-def get_tone_from_slider(level):
-    level = max(1, min(10, int(level)))
-    if level <= 3:
-        base_tone = "casual"
-        formality = level / 10.0
-    elif level <= 6:
-        base_tone = "business"
-        formality = (level - 3) / 6.0
-    else:
-        base_tone = "academic"
-        formality = (level - 6) / 4.0
-    return {
-        "tone": base_tone,
-        "formality": round(formality, 2),
-        "level": level,
-        "contractions": level <= 5,
-        "fillers": level <= 3,
-        "hedging": level >= 7,
-    }
-
-
-# ─── Feature: Style Training ─────────────────────────────────────────
-
-_STYLE_PROFILES = {}
-
-def analyze_writing_style(text):
-    sentences = re.split(r'[.!?]+', text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
-    words = text.split()
-    if not sentences or not words:
-        return None
-    sent_lengths = [len(s.split()) for s in sentences]
-    avg_sent_len = sum(sent_lengths) / len(sent_lengths)
-    word_lengths = [len(w) for w in words]
-    avg_word_len = sum(word_lengths) / len(word_lengths)
-    contraction_count = len(re.findall(r"\b\w+['\u2019]\w+", text))
-    contraction_ratio = contraction_count / max(len(sentences), 1)
-    filler_count = len(re.findall(r'\b(like|you know|I mean|honestly|basically|actually|well|so|look)\b', text, re.I))
-    filler_ratio = filler_count / max(len(words), 1) * 100
-    formal_transitions = len(re.findall(r'\b(Furthermore|Moreover|Additionally|Consequently|However|Therefore)\b', text, re.I))
-    casual_transitions = len(re.findall(r'\b(But|So|Also|Plus|And|Then|Still)\b', text, re.I))
-    paragraphs = text.split('\n\n')
-    para_lengths = [len(p.split()) for p in paragraphs if p.strip()]
-    avg_para_len = sum(para_lengths) / max(len(para_lengths), 1)
-    starters = [s.strip().split()[0].lower() for s in sentences if s.strip()]
-    starter_counter = Counter(starters)
-    top_starters = starter_counter.most_common(5)
-    mean = sum(sent_lengths) / len(sent_lengths)
-    variance = sum((l - mean)**2 for l in sent_lengths) / len(sent_lengths)
-    std = math.sqrt(variance)
-    burstiness_cv = std / mean if mean > 0 else 0
-    unique_words = len(set(w.lower() for w in words))
-    ttr = unique_words / len(words) if words else 0
-    return {
-        "avg_sentence_length": round(avg_sent_len, 1),
-        "avg_word_length": round(avg_word_len, 1),
-        "contraction_ratio": round(contraction_ratio, 2),
-        "filler_ratio": round(filler_ratio, 2),
-        "formal_transitions": formal_transitions,
-        "casual_transitions": casual_transitions,
-        "avg_paragraph_length": round(avg_para_len, 1),
-        "top_starters": top_starters,
-        "burstiness_cv": round(burstiness_cv, 3),
-        "type_token_ratio": round(ttr, 3),
-        "total_words": len(words),
-        "total_sentences": len(sentences),
-    }
-
-def build_style_prompt(style_stats):
-    if not style_stats:
-        return ""
-    parts = []
-    avg_sl = style_stats["avg_sentence_length"]
-    if avg_sl < 12:
-        parts.append("Use short sentences (average ~10 words). Mix with occasional very short ones (3-5 words).")
-    elif avg_sl < 20:
-        parts.append(f"Use medium-length sentences (average ~{int(avg_sl)} words).")
-    else:
-        parts.append(f"Use longer, complex sentences (average ~{int(avg_sl)} words).")
-    if style_stats["contraction_ratio"] > 0.5:
-        parts.append("Use lots of contractions (don't, isn't, it's, we're, they've).")
-    elif style_stats["contraction_ratio"] > 0.2:
-        parts.append("Use moderate contractions.")
-    else:
-        parts.append("Avoid contractions. Use full forms (do not, is not, it is).")
-    if style_stats["filler_ratio"] > 2.0:
-        parts.append("Use filler phrases naturally: 'like', 'you know', 'I mean', 'honestly', 'basically'.")
-    elif style_stats["filler_ratio"] > 0.5:
-        parts.append("Occasionally use casual phrases like 'honestly' or 'I think'.")
-    if style_stats["formal_transitions"] > style_stats["casual_transitions"]:
-        parts.append("Use formal transitions: Furthermore, Moreover, Consequently, However.")
-    else:
-        parts.append("Use casual transitions: But, So, Also, Plus, And.")
-    cv = style_stats["burstiness_cv"]
-    if cv >= 0.7:
-        parts.append("Vary sentence length dramatically - mix very short (3-5 words) with long (25+ words).")
-    elif cv >= 0.4:
-        parts.append("Moderately vary sentence length.")
-    else:
-        parts.append("Keep sentence lengths relatively consistent.")
-    avg_pl = style_stats["avg_paragraph_length"]
-    if avg_pl < 50:
-        parts.append("Use short paragraphs (2-3 sentences each).")
-    elif avg_pl > 150:
-        parts.append("Use longer paragraphs (6-10 sentences each).")
-    return " STYLE MATCHING: " + " ".join(parts)
-
-def train_style(samples):
-    all_stats = []
-    for sample in samples:
-        stats = analyze_writing_style(sample)
-        if stats:
-            all_stats.append(stats)
-    if not all_stats:
-        return None
-    avg_stats = {}
-    numeric_keys = ["avg_sentence_length", "avg_word_length", "contraction_ratio",
-                    "filler_ratio", "formal_transitions", "casual_transitions",
-                    "avg_paragraph_length", "burstiness_cv", "type_token_ratio"]
-    for key in numeric_keys:
-        values = [s[key] for s in all_stats if key in s]
-        avg_stats[key] = round(sum(values) / len(values), 3) if values else 0
-    avg_stats["total_samples"] = len(all_stats)
-    avg_stats["total_words"] = sum(s.get("total_words", 0) for s in all_stats)
-    profile_id = str(uuid.uuid4())[:8]
-    _STYLE_PROFILES[profile_id] = {
-        "id": profile_id,
-        "stats": avg_stats,
-        "prompt_addition": build_style_prompt(avg_stats),
-        "created": datetime.now().isoformat(),
-    }
-    return _STYLE_PROFILES[profile_id]
-
-
-# ─── Feature: Developer API with API Key System ──────────────────────
-
-_API_KEYS = {}
-API_KEY_PREFIX = "hai_"
-
-def generate_api_key(name="default", rate_limit=100):
-    import secrets
-    raw_key = API_KEY_PREFIX + secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    _API_KEYS[key_hash] = {
-        "name": name,
-        "created": datetime.now().isoformat(),
-        "requests": 0,
-        "rate_limit": rate_limit,
-        "last_used": None,
-        "key_preview": raw_key[:12] + "...",
-    }
-    return {"key": raw_key, "hash": key_hash, "name": name}
-
-def validate_api_key(raw_key):
-    if not raw_key:
-        return False, "No API key provided"
-    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    if key_hash not in _API_KEYS:
-        return False, "Invalid API key"
-    entry = _API_KEYS[key_hash]
-    now = datetime.now()
-    if entry["last_used"]:
-        last = datetime.fromisoformat(entry["last_used"])
-        if (now - last).total_seconds() > 3600:
-            entry["requests"] = 0
-    if entry["requests"] >= entry["rate_limit"]:
-        return False, f"Rate limit exceeded ({entry['rate_limit']}/hour)"
-    entry["requests"] += 1
-    entry["last_used"] = now.isoformat()
-    return True, "ok"
-
-def list_api_keys():
-    return [{"name": v["name"], "key_preview": v["key_preview"],
-             "created": v["created"], "requests": v["requests"],
-             "rate_limit": v["rate_limit"]} for v in _API_KEYS.values()]
-
-def revoke_api_key(key_hash):
-    if key_hash in _API_KEYS:
-        del _API_KEYS[key_hash]
-        return True
-    return False
-
-
-# ─── Feature: Webhook Notifications ──────────────────────────────────
-
-_WEBHOOKS = {}
-
-def register_webhook(url, events=None):
-    webhook_id = str(uuid.uuid4())[:8]
-    _WEBHOOKS[webhook_id] = {
-        "id": webhook_id,
-        "url": url,
-        "events": events or ["job_complete", "batch_complete"],
-        "active": True,
-        "created": datetime.now().isoformat(),
-    }
-    return _WEBHOOKS[webhook_id]
-
-def send_webhook(event, payload):
-    for wh_id, wh in list(_WEBHOOKS.items()):
-        if not wh["active"]:
-            continue
-        if event not in wh["events"]:
-            continue
-        try:
-            data = json.dumps({"event": event, "data": payload, "timestamp": datetime.now().isoformat()}).encode()
-            req = urllib.request.Request(
-                wh["url"],
-                data=data,
-                headers={"Content-Type": "application/json", "User-Agent": "HumanizeAI-Webhook/1.0"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=10)
-        except Exception as e:
-            print(f"[webhook] Failed to send to {wh['url']}: {e}", flush=True)
-
-def list_webhooks():
-    return list(_WEBHOOKS.values())
-
-def delete_webhook(webhook_id):
-    if webhook_id in _WEBHOOKS:
-        del _WEBHOOKS[webhook_id]
-        return True
-    return False
 
 
 # ─── HTML Template ────────────────────────────────────────────────────
@@ -2497,46 +1845,14 @@ HTML = r"""<!DOCTYPE html>
   .heatmap-score { font-size: 11px; font-weight: 600; margin-left: 8px; }
   .domain-select { padding: 8px 12px; background: #111; border: 1px solid #222; color: #e0e0e0; border-radius: 6px; font-size: 12px; }
   .ref-sample { width: 100%; height: 80px; background: #111; border: 1px solid #222; color: #e0e0e0; padding: 8px; font-size: 12px; border-radius: 6px; resize: vertical; margin-top: 8px; }
-  /* v5 new styles */
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px; background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 6px; }
-  .toolbar button { padding: 6px 12px; font-size: 11px; border-radius: 4px; }
-  .tab-bar { display: flex; gap: 0; border-bottom: 1px solid #222; margin-bottom: 12px; }
-  .tab-btn { padding: 8px 16px; font-size: 12px; background: none; color: #666; border: none; cursor: pointer; border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.5px; }
-  .tab-btn.active { color: #00cc88; border-bottom-color: #00cc88; }
-  .tab-btn:hover { color: #aaa; }
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
-  .stat-card { background: #111; border: 1px solid #1a1a1a; border-radius: 6px; padding: 12px; }
-  .stat-card .value { font-size: 18px; font-weight: 700; color: #00cc88; }
-  .stat-card .label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
-  .version-list { max-height: 300px; overflow-y: auto; }
-  .version-item { padding: 8px 12px; border: 1px solid #1a1a1a; border-radius: 4px; margin-bottom: 4px; cursor: pointer; font-size: 12px; }
-  .version-item:hover { border-color: #333; background: #111; }
-  .word-list-area { width: 100%; height: 80px; background: #111; border: 1px solid #222; color: #e0e0e0; padding: 8px; font-size: 12px; border-radius: 4px; resize: vertical; }
-  .export-btns { display: flex; gap: 6px; }
-  .export-btns button { padding: 6px 10px; font-size: 11px; }
-  .theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 100; background: #222; border: 1px solid #333; color: #888; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
-  body.light-mode { background: #f5f5f5; color: #1a1a1a; }
-  body.light-mode .sidebar { background: #fafafa; border-color: #e0e0e0; }
-  body.light-mode textarea { background: #fff; border-color: #ddd; color: #1a1a1a; }
-  body.light-mode .stat-card { background: #fff; border-color: #e0e0e0; }
-  body.light-mode .toolbar { background: #fafafa; border-color: #e0e0e0; }
-  body.light-mode .history-item { border-color: #e0e0e0; }
-  body.light-mode .history-item:hover { background: #f0f0f0; }
-  body.light-mode select, body.light-mode .domain-select { background: #fff; border-color: #ddd; color: #1a1a1a; }
-  body.light-mode .btn-secondary { background: #f0f0f0; color: #333; border-color: #ddd; }
-  body.light-mode .diff-unchanged { color: #999; }
-  body.light-mode .heatmap-paragraph { color: #333; }
   @media (max-width: 768px) { .panels { grid-template-columns: 1fr; } textarea { height: 250px; } .sidebar { display: none; } }
 </style>
 </head>
 <body>
-<button class="theme-toggle" onclick="toggleTheme()">Light/Dark</button>
 <div class="layout">
   <div class="sidebar" id="historySidebar">
     <h3>History</h3>
     <div id="historyList"><div style="color:#444;font-size:12px;">No history yet</div></div>
-    <h3 style="margin-top:16px;">Versions</h3>
-    <div class="version-list" id="versionList"><div style="color:#444;font-size:12px;">No versions yet</div></div>
   </div>
   <div class="container">
     <h1>HumanizeAI v3</h1>
@@ -2552,26 +1868,6 @@ HTML = r"""<!DOCTYPE html>
         <summary style="color: #888; font-size: 12px; cursor: pointer;">Optional: Paste your writing sample (style matching)</summary>
         <textarea class="ref-sample" id="refSample" placeholder="Paste a sample of YOUR actual writing here. The humanizer will match your style (sentence length, vocabulary, transitions)..."></textarea>
       </details>
-    </div>
-
-    <div class="toolbar">
-      <button class="btn-secondary" onclick="runPreview()">Preview (10%)</button>
-      <button class="btn-secondary" onclick="checkExternal()">ZeroGPT Check</button>
-      <button class="btn-secondary" onclick="checkGrammar()">Grammar</button>
-      <button class="btn-secondary" onclick="showReadability()">Readability</button>
-      <button class="btn-secondary" onclick="showSettings()">Settings</button>
-      <button class="btn-secondary" onclick="showBatchQueue()">Batch Queue</button>
-      <button class="btn-secondary" onclick="showApiManager()">API Keys</button>
-      <button class="btn-secondary" onclick="runVariants()">Variants</button>
-      <button class="btn-secondary" onclick="showToneSlider()">Tone</button>
-      <button class="btn-secondary" onclick="showStyleTrain()">Style Match</button>
-      <div class="export-btns">
-        <button class="btn-secondary" onclick="downloadDocx()">DOCX</button>
-        <button class="btn-secondary" onclick="downloadTxt()">TXT</button>
-        <button class="btn-secondary" onclick="downloadMd()">MD</button>
-      </div>
-      <button class="btn-secondary" onclick="showStatsTab()">Stats</button>
-      <button class="btn-secondary" onclick="showCustomLists()">Word Lists</button>
     </div>
 
     <div class="controls">
@@ -2590,7 +1886,6 @@ HTML = r"""<!DOCTYPE html>
         <option value="ag/claude-opus-4-6-thinking">Premium (Opus Thinking, ~25s/pass)</option>
         <option value="cx/gpt-5.4">High Quality (GPT-5.4, ~8s/pass)</option>
         <option value="cx/gpt-5.4-mini">Fast Quality (GPT-5.4 Mini, ~4s/pass)</option>
-
       </select>
       <select id="tone">
         <option value="casual">Casual Tone</option>
@@ -2624,43 +1919,12 @@ HTML = r"""<!DOCTYPE html>
       </div>
     </div>
 
-    <div id="liveWordCount" style="font-size:11px;color:#666;margin-bottom:4px;">Input: 0 words | Output: 0 words</div>
-    <div class="status" id="status">Ready | Score: <span id="liveScore" style="color:#666;">--</span></div>
+    <div class="status" id="status">Ready</div>
     <div class="stats" id="stats"></div>
 
     <div class="heatmap-container" id="heatmapContainer">
       <div class="heatmap-title">Detection Heatmap (click red paragraphs to re-process)</div>
       <div id="heatmapBody"></div>
-    </div>
-
-    <div id="statsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Processing Statistics</h3>
-      <div class="stats-grid" id="statsGrid"></div>
-    </div>
-
-    <div id="customListsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:8px;">Custom Word Lists</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Preserve: words to never modify (one per line). Avoid: AI words to always replace.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <label style="font-size:11px;color:#888;">Preserve List</label>
-          <textarea class="word-list-area" id="preserveList" placeholder="Malaysia
-UMP
-FYP"></textarea>
-        </div>
-        <div>
-          <label style="font-size:11px;color:#888;">Avoid List</label>
-          <textarea class="word-list-area" id="avoidList" placeholder="delve
-leverage
-utilize"></textarea>
-        </div>
-      </div>
-      <button class="btn-primary" onclick="saveCustomLists()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Save Lists</button>
-    </div>
-
-    <div id="previewPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:8px;">Preview (first 10%)</h3>
-      <div id="previewContent" style="font-size:12px;color:#aaa;line-height:1.6;"></div>
     </div>
 
     <div class="diff-container" id="diffContainer">
@@ -2669,67 +1933,6 @@ utilize"></textarea>
         <button class="btn-secondary" onclick="toggleDiff()" style="padding:6px 12px;font-size:12px;">Toggle View</button>
       </div>
       <div class="diff-body" id="diffBody"></div>
-    </div>
-
-
-
-    <div id="apiPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">API Provider Management</h3>
-      <div style="margin-bottom:12px;">
-        <input type="text" id="providerName" placeholder="Provider name (e.g., openai)" style="width:30%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;margin-right:8px;">
-        <input type="text" id="apiKey" placeholder="API key" style="width:40%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;margin-right:8px;">
-        <button class="btn-primary" onclick="addProvider()" style="padding:8px 16px;font-size:12px;">Add</button>
-      </div>
-      <div id="providerList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">Loading...</div>
-    </div>
-    <div id="batchPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Batch Queue</h3>
-      <div id="batchList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">No files queued</div>
-      <button class="btn-primary" onclick="processBatch()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Process All</button>
-    </div>
-
-    <div id="variantsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Output Variants (pick best)</h3>
-      <div id="variantsResults" style="font-size:12px;color:#aaa;">Generate 3 versions, auto-pick lowest AI score</div>
-    </div>
-    <div id="toneSliderPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Tone Slider</h3>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <span style="font-size:11px;color:#888;">Casual</span>
-        <input type="range" id="toneLevel" min="0" max="1" step="0.1" value="0.5" style="flex:1;">
-        <span style="font-size:11px;color:#888;">Formal</span>
-        <button class="btn-primary" onclick="applyToneSlider()" style="padding:6px 12px;font-size:11px;">Apply</button>
-      </div>
-      <div id="toneResult" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
-    </div>
-    <div id="styleTrainPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Style Training (match your voice)</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Paste 3-5 samples of YOUR writing to train the humanizer on your style.</p>
-      <textarea id="styleSamples" style="width:100%;height:120px;background:#111;border:1px solid #222;color:#e0e0e0;padding:8px;font-size:12px;border-radius:4px;resize:vertical;" placeholder="Paste writing samples here (separated by ---)..."></textarea>
-      <button class="btn-primary" onclick="saveStyleSamples()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Save Style Profile</button>
-      <div id="styleStatus" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
-    </div>
-    <div id="settingsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Settings</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label style="font-size:11px;color:#888;">Chunk Size</label><input type="number" id="chunkSize" value="400" min="100" max="1000" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-        <div><label style="font-size:11px;color:#888;">Overlap</label><input type="number" id="overlap" value="2" min="0" max="5" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-        <div><label style="font-size:11px;color:#888;">Parallel</label><input type="number" id="parallel" value="4" min="1" max="8" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-        <div><label style="font-size:11px;color:#888;">Creativity</label><input type="number" id="creativity" value="0.6" min="0.1" max="1.0" step="0.1" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-      </div>
-      <div style="margin-top:12px;">
-        <label style="font-size:11px;color:#888;"><input type="checkbox" id="strictWordCount"> Strict word count (+-5%)</label><br>
-        <label style="font-size:11px;color:#888;"><input type="checkbox" id="autoRetry"> Auto-retry if score > 40</label>
-      </div>
-      <button class="btn-primary" onclick="saveSettings()" style="margin-top:12px;padding:8px 16px;font-size:12px;">Save</button>
-    </div>
-    <div id="grammarPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Grammar Check</h3>
-      <div id="grammarResults" style="font-size:12px;color:#aaa;">Click Grammar to check...</div>
-    </div>
-    <div id="readabilityPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Readability</h3>
-      <div id="readabilityResults" style="font-size:12px;color:#aaa;">Click Readability to analyze...</div>
     </div>
   </div>
 </div>
@@ -2790,16 +1993,7 @@ async function humanize() {
     const startResp = await fetch('/api/humanize', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        text: input, 
-        passes: passes, 
-        model: model, 
-        tone: tone, 
-        domain: document.getElementById('domain').value, 
-        ref_sample: document.getElementById('refSample').value,
-        autoRetry: document.getElementById('autoRetry')?.checked || false,
-        strictWordCount: document.getElementById('strictWordCount')?.checked || false
-      })
+      body: JSON.stringify({text: input, passes: passes, model: model, tone: tone, domain: document.getElementById('domain').value, ref_sample: document.getElementById('refSample').value})
     });
     const startData = await startResp.json();
     if (startData.error) {
@@ -3045,264 +2239,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
-// Theme toggle
-let darkMode = true;
-function toggleTheme() {
-  darkMode = !darkMode;
-  document.body.classList.toggle('light-mode', !darkMode);
-}
-
-// Stats panel
-function showStatsTab() {
-  const panel = document.getElementById('statsPanel');
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  if (panel.style.display === 'block') loadStats();
-}
-
-async function loadStats() {
-  try {
-    const resp = await fetch('/api/stats');
-    const s = await resp.json();
-    const grid = document.getElementById('statsGrid');
-    const avgTime = s.total_jobs > 0 ? Math.round(s.total_time_seconds / s.total_jobs) : 0;
-    const successRate = s.total_jobs > 0 ? Math.round(s.success_count / s.total_jobs * 100) : 0;
-    const cacheRate = (s.cache_hits + s.cache_misses) > 0 ? Math.round(s.cache_hits / (s.cache_hits + s.cache_misses) * 100) : 0;
-    grid.innerHTML = 
-      '<div class="stat-card"><div class="value">' + s.total_jobs + '</div><div class="label">Total Jobs</div></div>' +
-      '<div class="stat-card"><div class="value">' + s.total_input_words.toLocaleString() + '</div><div class="label">Words Processed</div></div>' +
-      '<div class="stat-card"><div class="value">' + avgTime + 's</div><div class="label">Avg Time</div></div>' +
-      '<div class="stat-card"><div class="value">' + successRate + '%</div><div class="label">Success Rate</div></div>' +
-      '<div class="stat-card"><div class="value">' + cacheRate + '%</div><div class="label">Cache Hit Rate</div></div>' +
-      '<div class="stat-card"><div class="value">' + Object.keys(s.models_used).length + '</div><div class="label">Models Used</div></div>';
-  } catch(e) {}
-}
-
-// Custom word lists
-function showCustomLists() {
-  const panel = document.getElementById('customListsPanel');
-  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-}
-
-async function saveCustomLists() {
-  const preserve = document.getElementById('preserveList').value;
-  const avoid = document.getElementById('avoidList').value;
-  try {
-    const resp = await fetch('/api/custom-lists', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({preserve: preserve, avoid: avoid})
-    });
-    const data = await resp.json();
-    document.getElementById('status').textContent = 'Saved: ' + data.preserve_count + ' preserve, ' + data.avoid_count + ' avoid words';
-  } catch(e) {
-    document.getElementById('status').textContent = 'Error: ' + e.message;
-  }
-}
-
-// Preview processing
-async function runPreview() {
-  const input = document.getElementById('input').value.trim();
-  if (!input) { alert('Paste text first'); return; }
-  const model = document.getElementById('model').value;
-  const tone = document.getElementById('tone').value;
-  const panel = document.getElementById('previewPanel');
-  panel.style.display = 'block';
-  document.getElementById('previewContent').innerHTML = '<span style="color:#666;">Processing preview...</span>';
-  
-  try {
-    const resp = await fetch('/api/preview', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text: input, model: model, tone: tone})
-    });
-    const data = await resp.json();
-    if (data.error) { document.getElementById('previewContent').textContent = 'Error: ' + data.error; return; }
-    
-    const inScore = data.input_score?.score || '?';
-    const outScore = data.output_score?.score || '?';
-    const pct = Math.round(data.output_words / data.input_words * 100);
-    document.getElementById('previewContent').innerHTML = 
-      '<div style="margin-bottom:8px;"><b>Score:</b> ' + inScore + ' → ' + outScore + ' | <b>Words:</b> ' + data.input_words + ' → ' + data.output_words + ' (' + pct + '%) | <b>Time:</b> ' + data.time + 's | <b>Est full:</b> ~' + data.estimated_time + 's</div>' +
-      '<div style="background:#111;padding:12px;border-radius:4px;font-size:12px;line-height:1.6;max-height:300px;overflow-y:auto;">' + escapeHtml(data.preview_output) + '</div>';
-  } catch(e) {
-    document.getElementById('previewContent').textContent = 'Error: ' + e.message;
-  }
-}
-
-// External ZeroGPT check
-async function checkExternal() {
-  const text = document.getElementById('output').value || document.getElementById('input').value;
-  if (!text) { alert('No text to check'); return; }
-  document.getElementById('status').textContent = 'Checking ZeroGPT...';
-  try {
-    const resp = await fetch('/api/external-check', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({text: text.substring(0, 5000)})
-    });
-    const data = await resp.json();
-    if (data.error) { document.getElementById('status').textContent = 'ZeroGPT: ' + data.error; return; }
-    const ai = data.ai_percentage || 0;
-    const grade = ai < 30 ? 'HUMAN' : ai < 60 ? 'MIXED' : 'AI';
-    const color = ai < 30 ? '#00cc88' : ai < 60 ? '#ffaa00' : '#ff4444';
-    document.getElementById('status').innerHTML = 'ZeroGPT: <span style="color:' + color + ';font-weight:700;">' + ai + '% AI (' + grade + ')</span> | ' + data.human_sentences + ' human / ' + data.ai_sentences + ' AI sentences';
-  } catch(e) {
-    document.getElementById('status').textContent = 'ZeroGPT error: ' + e.message;
-  }
-}
-
-// Export functions
-function downloadTxt() {
-  const text = document.getElementById('output').value;
-  if (!text) { alert('No output'); return; }
-  fetch('/api/download/txt', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}) })
-    .then(r => r.blob()).then(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'humanized.txt'; a.click();
-      URL.revokeObjectURL(url);
-    });
-}
-
-function downloadMd() {
-  const text = document.getElementById('output').value;
-  if (!text) { alert('No output'); return; }
-  fetch('/api/download/md', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({text}) })
-    .then(r => r.blob()).then(blob => {
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.href = url; a.download = 'humanized.md'; a.click();
-      URL.revokeObjectURL(url);
-    });
-}
-
-// Version history
-async function loadVersions() {
-  try {
-    const resp = await fetch('/api/versions');
-    const versions = await resp.json();
-    const list = document.getElementById('versionList');
-    if (!versions.length) { list.innerHTML = '<div style="color:#444;font-size:12px;">No versions yet</div>'; return; }
-    list.innerHTML = versions.map(v => 
-      '<div class="version-item" onclick="loadVersion(' + v.id + ')">' +
-      '<span style="color:#00cc88;">' + v.score + '</span> | ' + v.input_words + '→' + v.output_words + 'w | ' + v.tone +
-      '</div>'
-    ).join('');
-  } catch(e) {}
-}
-
-async function loadVersion(id) {
-  try {
-    const resp = await fetch('/api/version/' + id);
-    const v = await resp.json();
-    if (v.output_text) {
-      document.getElementById('output').value = v.output_text;
-      document.getElementById('status').textContent = 'Loaded version ' + id + ' (' + v.output_words + ' words, score: ' + v.score + ')';
-    }
-  } catch(e) {}
-}
-
-// Multiple file drag & drop
-document.addEventListener('DOMContentLoaded', () => {
-  loadHistory();
-  loadVersions();
-  loadSettings();
-  setupRealTimeDetection();
-  const zone = document.getElementById('uploadZone');
-  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.style.borderColor = '#00cc88'; });
-  zone.addEventListener('dragleave', () => { zone.style.borderColor = '#333'; });
-  zone.addEventListener('drop', (e) => {
-    e.preventDefault(); zone.style.borderColor = '#333';
-    const files = e.dataTransfer.files;
-    if (files.length === 1) {
-      const input = document.getElementById('fileInput');
-      const dt = new DataTransfer(); dt.items.add(files[0]);
-      input.files = dt.files;
-      uploadFile(input);
-    } else if (files.length > 1) {
-      batchUpload(files);
-    }
-  });
-});
-
-async function batchUpload(files) {
-  const status = document.getElementById('status');
-  status.textContent = 'Batch uploading ' + files.length + ' files...';
-  for (let i = 0; i < files.length; i++) {
-    const formData = new FormData();
-    formData.append('file', files[i]);
-    try {
-      const resp = await fetch('/api/upload', { method: 'POST', body: formData });
-      const data = await resp.json();
-      if (data.text) {
-        const current = document.getElementById('input').value;
-        document.getElementById('input').value = current + (current ? '\n\n---\n\n' : '') + data.text;
-      }
-    } catch(e) {}
-  }
-  status.textContent = 'Loaded ' + files.length + ' files (' + document.getElementById('input').value.split(/\s+/).length + ' total words)';
-}
-
-
-// Live word count
-function updateWordCount() {
-  var inp = document.getElementById('input').value;
-  var out = document.getElementById('output').value;
-  var iw = inp.trim() ? inp.trim().split(/\s+/).length : 0;
-  var ow = out.trim() ? out.trim().split(/\s+/).length : 0;
-  var pct = iw > 0 ? Math.round(ow/iw*100) : 0;
-  var color = Math.abs(ow-iw) < 20 ? '#00cc88' : '#ffaa00';
-  var el = document.getElementById('liveWordCount');
-  if(el) el.innerHTML = 'Input: <b>'+iw+'</b> | Output: <b>'+ow+'</b> | <span style="color:'+color+'">'+pct+'% kept</span>';
-}
-document.getElementById('input').addEventListener('input', updateWordCount);
-document.getElementById('output').addEventListener('input', updateWordCount);
-
-
-function runVariants() {
-  var text = document.getElementById('input').value.trim();
-  if(!text) { alert('No text'); return; }
-  document.getElementById('variantsPanel').style.display = 'block';
-  document.getElementById('variantsResults').innerHTML = 'Generating 3 variants...';
-  fetch('/api/variants', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text, num:3, model:document.getElementById('model').value, tone:document.getElementById('tone').value})})
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if(d.error) { document.getElementById('variantsResults').textContent = 'Error: '+d.error; return; }
-      if(d.variants && d.variants.length > 0) {
-        var best = d.variants.reduce(function(a,b) { return (a.score||99) < (b.score||99) ? a : b; });
-        var h = '<div style="margin-bottom:8px;color:#00cc88;">Best variant (score: '+(best.score||'?')+')</div>';
-        d.variants.forEach(function(v,i) {
-          var isBest = v === best;
-          h += '<div style="padding:10px;border:1px solid '+(isBest?'#00cc88':'#222')+';border-radius:4px;margin-bottom:8px;cursor:pointer;" onclick="document.getElementById(\'output\').value=this.querySelector(\'.vtext\').textContent;updateWordCount();">';
-          h += '<div style="font-size:11px;color:#888;margin-bottom:4px;">Variant '+(i+1)+' | Score: '+(v.score||'?')+' | '+(v.words||0)+' words'+(isBest?' ★':'')+'</div>';
-          h += '<div class="vtext" style="font-size:12px;max-height:120px;overflow-y:auto;">'+(v.text||'').substring(0,300)+'...</div>';
-          h += '</div>';
-        });
-        document.getElementById('variantsResults').innerHTML = h;
-      }
-    })
-    .catch(function(e) { document.getElementById('variantsResults').textContent = 'Error: '+e.message; });
-}
-function showToneSlider() { document.getElementById('toneSliderPanel').style.display = 'block'; }
-function applyToneSlider() {
-  var text = document.getElementById('output').value || document.getElementById('input').value;
-  if(!text) { alert('No text'); return; }
-  var level = document.getElementById('toneLevel').value;
-  document.getElementById('toneResult').textContent = 'Applying...';
-  fetch('/api/tone-slider', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text, level:parseFloat(level)})})
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if(d.text) { document.getElementById('output').value = d.text; updateWordCount(); document.getElementById('toneResult').innerHTML = '<span style="color:#00cc88;">Applied!</span>'; }
-      else document.getElementById('toneResult').textContent = 'Error';
-    })
-    .catch(function(e) { document.getElementById('toneResult').textContent = 'Error: '+e.message; });
-}
-function showStyleTrain() { document.getElementById('styleTrainPanel').style.display = 'block'; }
-function saveStyleSamples() {
-  var samples = document.getElementById('styleSamples').value.trim();
-  if(!samples) { alert('Paste samples first'); return; }
-  localStorage.setItem('humanizerStyleProfile', samples);
-  document.getElementById('styleStatus').innerHTML = '<span style="color:#00cc88;">Style profile saved! ('+samples.length+' chars)</span>';
-}
-
 </script>
 </body>
 </html>"""
@@ -3325,63 +2261,14 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/history":
             self._json_response(HISTORY)
-        elif self.path == "/api/versions":
-            versions_summary = [{"id": v["id"], "timestamp": v["timestamp"], 
-                               "input_words": v["input_words"], "output_words": v["output_words"],
-                               "score": v["score"], "model": v["model"], "tone": v["tone"]}
-                              for v in VERSIONS]
-            self._json_response(versions_summary)
-        elif self.path.startswith("/api/version/"):
-            vid = int(self.path.split("/")[-1])
-            version = next((v for v in VERSIONS if v["id"] == vid), None)
-            if version:
-                self._json_response(version)
-            else:
-                self._json_response({"error": "Version not found"}, 404)
-        elif self.path == "/api/stats":
-            self._json_response(STATS)
-        elif self.path == "/api/debug-cache":
-            self._json_response({
-                "cache_size": len(_LLM_CACHE),
-                "cache_hits": _LLM_CACHE_HITS,
-                "cache_misses": _LLM_CACHE_MISSES,
-                "cache_keys": list(_LLM_CACHE.keys())[:5]
-            })
         elif self.path.startswith("/api/progress/"):
             job_id = self.path.split("/api/progress/")[-1]
             with JOBS_LOCK:
                 job = JOBS.get(job_id)
             if job:
-                # Add time estimation to progress response
-                if job["status"] == "processing":
-                    elapsed = time.time() - job.get("start_time", time.time())
-                    model = job.get("model", LLM_MODEL)
-                    time_est = estimate_time_remaining(
-                        job.get("input_words", 0),
-                        job.get("chunks_total", 1),
-                        job.get("chunks_done", 0),
-                        elapsed,
-                        model=model,
-                    )
-                    job["time_estimate"] = time_est
-                    job["time_remaining_text"] = format_time_remaining(time_est["remaining_seconds"])
                 self._json_response(job)
             else:
                 self._json_response({"error": "Job not found"}, 404)
-        elif self.path == "/api/keys/list":
-            self._json_response(list_api_keys())
-        elif self.path == "/api/webhooks/list":
-            self._json_response(list_webhooks())
-        elif self.path == "/api/style/profiles":
-            profiles = [{"id": p["id"], "stats": p["stats"], "created": p["created"]} for p in _STYLE_PROFILES.values()]
-            self._json_response(profiles)
-        elif self.path == "/api/cache/stats":
-            self._json_response({
-                "full_text_cache_size": len(_FULL_TEXT_CACHE),
-                "llm_cache_size": len(_LLM_CACHE),
-                "llm_cache_hits": _LLM_CACHE_HITS,
-                "llm_cache_misses": _LLM_CACHE_MISSES,
-            })
         else:
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -3397,48 +2284,6 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_upload()
         elif self.path == "/api/download":
             self._handle_download()
-        elif self.path == "/api/download/txt":
-            self._handle_download_txt()
-        elif self.path == "/api/download/md":
-            self._handle_download_md()
-        elif self.path == "/api/batch":
-            self._handle_batch()
-        elif self.path == "/api/preview":
-            self._handle_preview()
-        elif self.path == "/api/custom-lists":
-            self._handle_custom_lists()
-        elif self.path == "/api/external-check":
-            self._handle_external_check()
-        elif self.path == "/api/readability":
-            self._handle_readability()
-        elif self.path == "/api/grammar":
-            self._handle_grammar()
-        elif self.path == "/api/variants":
-            self._handle_variants()
-        elif self.path == "/api/tone-slider":
-            self._handle_tone_slider()
-        elif self.path == "/api/style-train":
-            self._handle_style_train()
-        elif self.path == "/api/docs":
-            self._handle_api_docs()
-        elif self.path == "/api/webhook/register":
-            self._handle_webhook_register()
-        elif self.path == "/api/webhook/delete":
-            self._handle_webhook_delete()
-        elif self.path == "/api/style/train":
-            self._handle_style_train()
-        elif self.path == "/api/style/analyze":
-            self._handle_style_analyze()
-        elif self.path == "/api/keys/generate":
-            self._handle_key_generate()
-        elif self.path == "/api/keys/revoke":
-            self._handle_key_revoke()
-        elif self.path == "/api/webhooks/register":
-            self._handle_webhook_register()
-        elif self.path == "/api/webhooks/delete":
-            self._handle_webhook_delete()
-        elif self.path == "/v1/humanize":
-            self._handle_dev_api()
         else:
             self.send_response(404)
             self.end_headers()
@@ -3454,35 +2299,9 @@ class Handler(BaseHTTPRequestHandler):
             tone = body.get("tone", "casual")
             domain = body.get("domain", "general")
             ref_sample = body.get("ref_sample", "")
-            preserve = body.get("preserve", "")
-            avoid = body.get("avoid", "")
-            auto_retry = body.get("autoRetry", False)
-            strict_wc = body.get("strictWordCount", False)
-            if preserve or avoid:
-                load_custom_lists(preserve, avoid)
-                import sys
-                msg = f"[HANDLER] Loaded: preserve={len(CUSTOM_PRESERVE)}, avoid={len(CUSTOM_AVOID)}, set={CUSTOM_AVOID}"
-                sys.stderr.write(msg + chr(10))
-                sys.stderr.flush()
-                with open("debug.log", "a") as df:
-                    df.write(msg + chr(10))
 
             if not text:
                 self._json_response({"error": "No text provided"}, 400)
-                return
-
-            # Check full-text cache first
-            text_hash = make_text_hash(text, passes, model, tone)
-            cached = fulltext_cache_get(text_hash)
-            if cached:
-                self._json_response({
-                    "cached": True,
-                    "result": cached["text"],
-                    "output_words": cached["words"],
-                    "score": cached["score"],
-                    "time": 0,
-                    "job_id": "cached",
-                })
                 return
 
             job_id = str(uuid.uuid4())[:8]
@@ -3504,14 +2323,12 @@ class Handler(BaseHTTPRequestHandler):
                     "output_words": 0,
                     "input_score": calc_detection_score(text),
                     "output_score": None,
-                    "start_time": time.time(),
-                    "model": model or LLM_MODEL,
                 }
 
             # Start background thread
             thread = threading.Thread(
                 target=self._run_humanize_job,
-                args=(job_id, text, passes, model, tone, domain, ref_sample, auto_retry, strict_wc),
+                args=(job_id, text, passes, model, tone, domain, ref_sample),
                 daemon=True,
             )
             thread.start()
@@ -3523,7 +2340,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[ERROR] {traceback.format_exc()}", flush=True)
             self._json_response({"error": str(e)}, 500)
 
-    def _run_humanize_job(self, job_id, text, passes, model, tone, domain="general", ref_sample="", auto_retry=False, strict_wc=False):
+    def _run_humanize_job(self, job_id, text, passes, model, tone, domain="general", ref_sample=""):
         """Run full humanization in background, updating JOBS dict progressively."""
         t0 = time.time()
         input_words = len(text.split())
@@ -3536,25 +2353,11 @@ class Handler(BaseHTTPRequestHandler):
                 result = humanize_chunk(text, passes, model or LLM_MODEL, tone)
                 result = advanced_post_process(result, tone=tone)
                 result = paragraph_vary(result)
-                # Final: apply custom avoid + restore preserve AFTER all post-processing
-                result = apply_custom_avoid(result)
-                result = restore_custom_preserve(result)
                 elapsed = round(time.time() - t0, 1)
                 output_score = calc_detection_score(result)
 
-                # Strict word count enforcement (±5%)
-                # strict_wc is a parameter
-                if strict_wc and input_words > 0:
-                    out_words = len(result.split())
-                    ratio = out_words / input_words
-                    if ratio < 0.95 or ratio > 1.05:
-                        # Re-process problematic chunks
-                        result = humanize_chunk(result, 1, model, tone)
-                
                 with JOBS_LOCK:
-                
                     JOBS[job_id].update({
-                        
                         "status": "done",
                         "progress": 100,
                         "chunks_done": 1,
@@ -3564,39 +2367,6 @@ class Handler(BaseHTTPRequestHandler):
                         "output_words": len(result.split()),
                         "output_score": output_score,
                     })
-
-                # Save to history, versions, and stats (same as long text path)
-                save_history({
-                    "id": len(HISTORY) + 1,
-                    "timestamp": datetime.now().isoformat(),
-                    "input_words": input_words,
-                    "output_words": len(result.split()),
-                    "score_before": JOBS[job_id]["input_score"]["score"],
-                    "score_after": output_score["score"],
-                    "tone": tone,
-                    "model": model_label,
-                    "preview": result[:100],
-                })
-                save_version({
-                    "id": len(VERSIONS) + 1,
-                    "timestamp": datetime.now().isoformat(),
-                    "input": text[:500],
-                    "output": result,
-                    "input_words": input_words,
-                    "output_words": len(result.split()),
-                    "score": output_score["score"],
-                    "score_before": JOBS[job_id]["input_score"]["score"],
-                    "score_after": output_score["score"],
-                    "tone": tone,
-                    "model": model_label,
-                    "time": elapsed,
-                })
-                update_stats({
-                    "input_words": input_words,
-                    "output_words": len(result.split()),
-                    "time": elapsed,
-                    "model": model_label,
-                })
                 return
 
             # Long text: parallel chunks
@@ -3656,7 +2426,6 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"[{job_id}] Reference style: avg sentence length = {ref_avg_len:.1f} words", flush=True)
 
             # Smooth transitions
-            processed_chunks = deduplicate_overlaps(processed_chunks)
             result = smooth_transitions(processed_chunks, tone=tone)
             if tone != "academic":
                 result = ultra_short_inject(result)
@@ -3677,7 +2446,6 @@ class Handler(BaseHTTPRequestHandler):
                         processed = humanize_chunk(chunks[idx], passes, model or LLM_MODEL, tone)
                         processed = advanced_post_process(processed, tone=tone)
                         processed_chunks[idx] = processed
-                    processed_chunks = deduplicate_overlaps(processed_chunks)
                     result = smooth_transitions(processed_chunks, tone=tone)
                     if tone != "academic":
                         result = ultra_short_inject(result)
@@ -3686,10 +2454,6 @@ class Handler(BaseHTTPRequestHandler):
                     result = paragraph_vary(result)
                     result = re.sub(r'  +', ' ', result)
                     result = re.sub(r'\.\s*\.', '.', result)
-
-            # Final: apply custom avoid + restore preserve
-            result = apply_custom_avoid(result)
-            result = restore_custom_preserve(result)
 
             elapsed = round(time.time() - t0, 1)
             output_score = calc_detection_score(result)
@@ -3709,28 +2473,6 @@ class Handler(BaseHTTPRequestHandler):
                 "tone": tone,
             })
 
-            # Save version for undo
-            save_version({
-                "id": len(VERSIONS) + 1,
-                "timestamp": datetime.now().isoformat(),
-                "input_words": input_words,
-                "output_words": len(result.split()),
-                "input_text": text[:500],
-                "output_text": result,
-                "score": output_score["score"],
-                "model": model_label,
-                "tone": tone,
-            })
-
-            # Update processing stats
-            update_stats({
-                "input_words": input_words,
-                "output_words": len(result.split()),
-                "time": elapsed,
-                "model": model_label,
-                "status": "done",
-            })
-
             with JOBS_LOCK:
                 JOBS[job_id].update({
                     "status": "done",
@@ -3742,20 +2484,6 @@ class Handler(BaseHTTPRequestHandler):
                     "output_words": len(result.split()),
                     "output_score": output_score,
                 })
-
-            # Cache result for future identical requests
-            text_hash = make_text_hash(text, passes, model, tone)
-            fulltext_cache_set(text_hash, {"text": result, "score": output_score, "words": len(result.split()), "time": elapsed})
-
-            # Send webhook notification
-            send_webhook("job_complete", {
-                "job_id": job_id,
-                "input_words": input_words,
-                "output_words": len(result.split()),
-                "score": output_score["score"],
-                "grade": output_score["grade"],
-                "time": elapsed,
-            })
 
         except Exception as e:
             import traceback
@@ -3842,489 +2570,6 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(docx_bytes)
 
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_download_txt(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            encoded = text.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain; charset=utf-8")
-            self.send_header("Content-Disposition", 'attachment; filename="humanized.txt"')
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_download_md(self):
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            md = f"# Humanized Text\n\n{text}"
-            encoded = md.encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "text/markdown; charset=utf-8")
-            self.send_header("Content-Disposition", 'attachment; filename="humanized.md"')
-            self.send_header("Content-Length", str(len(encoded)))
-            self.end_headers()
-            self.wfile.write(encoded)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_batch(self):
-        """Accept multiple texts, process all, return results."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            texts = body.get("texts", [])
-            model = body.get("model", LLM_MODEL)
-            tone = body.get("tone", "casual")
-            
-            if not texts:
-                self._json_response({"error": "No texts provided"}, 400)
-                return
-            
-            job_id = str(uuid.uuid4())[:8]
-            with JOBS_LOCK:
-                JOBS[job_id] = {
-                    "status": "processing",
-                    "progress": 0,
-                    "chunks_done": 0,
-                    "chunks_total": len(texts),
-                    "partial": "",
-                    "result": None,
-                    "batch_results": [],
-                    "error": None,
-                    "time": None,
-                    "input_words": sum(len(t.split()) for t in texts),
-                    "output_words": 0,
-                    "input_score": {},
-                    "output_score": {},
-                }
-            
-            thread = threading.Thread(
-                target=self._run_batch_job,
-                args=(job_id, texts, model, tone),
-                daemon=True,
-            )
-            thread.start()
-            self._json_response({"job_id": job_id, "batch_size": len(texts)})
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _run_batch_job(self, job_id, texts, model, tone):
-        t0 = time.time()
-        results = []
-        total_words = 0
-        for i, text in enumerate(texts):
-            try:
-                result = humanize_chunk(text, 3, model, tone)
-                result = advanced_post_process(result, tone=tone)
-                results.append({"index": i, "status": "done", "text": result, 
-                              "input_words": len(text.split()), "output_words": len(result.split())})
-                total_words += len(result.split())
-            except Exception as e:
-                results.append({"index": i, "status": "error", "error": str(e), "text": text})
-                total_words += len(text.split())
-            
-            with JOBS_LOCK:
-                JOBS[job_id].update({
-                    "progress": round((i+1)/len(texts)*100),
-                    "chunks_done": i+1,
-                })
-        
-        elapsed = round(time.time() - t0, 1)
-        with JOBS_LOCK:
-            JOBS[job_id].update({
-                "status": "done",
-                "progress": 100,
-                "chunks_done": len(texts),
-                "batch_results": results,
-                "results": results,
-                "result": json.dumps(results),
-                "time": elapsed,
-                "output_words": total_words,
-            })
-
-    def _handle_preview(self):
-        """Process first 10% of text for preview before full processing."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            model = body.get("model", LLM_MODEL)
-            tone = body.get("tone", "casual")
-            
-            if not text:
-                self._json_response({"error": "No text"}, 400)
-                return
-            
-            words = text.split()
-            preview_words = max(50, len(words) // 10)
-            preview_text = ' '.join(words[:preview_words])
-            
-            t0 = time.time()
-            result = humanize_chunk(preview_text, 3, model, tone)
-            result = advanced_post_process(result, tone=tone)
-            elapsed = round(time.time() - t0, 1)
-            
-            in_score = calc_detection_score(preview_text)
-            out_score = calc_detection_score(result)
-            
-            # Auto-retry if score still high
-            auto_retry = body.get('autoRetry', False)
-            retry_count = 0
-            while auto_retry and out_score.get('score', 100) > 40 and retry_count < 2:
-                retry_count += 1
-                result = humanize_chunk(result, passes, model, tone)
-                out_score = calc_detection_score(result)
-            
-            self._json_response({
-                "preview_input": preview_text,
-                "preview_output": result,
-                "input_words": len(preview_text.split()),
-                "output_words": len(result.split()),
-                "input_score": in_score,
-                "output_score": out_score,
-                "time": elapsed,
-                "total_words": len(words),
-                "estimated_time": round(elapsed * (len(words) / preview_words) / 4, 0),
-            })
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_custom_lists(self):
-        """Update custom preserve/avoid word lists."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            preserve = body.get("preserve", "")
-            avoid = body.get("avoid", "")
-            load_custom_lists(preserve, avoid)
-            self._json_response({
-                "preserve_count": len(CUSTOM_PRESERVE),
-                "avoid_count": len(CUSTOM_AVOID),
-                "preserve_sample": list(CUSTOM_PRESERVE)[:10],
-                "avoid_sample": list(CUSTOM_AVOID)[:10],
-            })
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_external_check(self):
-        """Check text against ZeroGPT API with fallback to internal scoring."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")[:5000]  # max 5000 chars for API
-            
-            if not text:
-                self._json_response({"error": "No text"}, 400)
-                return
-            
-            # Try ZeroGPT API
-            try:
-                payload = json.dumps({"input_text": text}).encode()
-                req = urllib.request.Request(
-                    "https://api.zerogpt.com/api/detect/detectText",
-                    data=payload,
-                    headers={
-                        "Content-Type": "application/json",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                        "Origin": "https://www.zerogpt.com",
-                        "Referer": "https://www.zerogpt.com/",
-                    },
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    data = json.loads(resp.read())
-            except Exception as e:
-                # Fallback to internal scoring if ZeroGPT fails
-                score = calc_detection_score(text)
-                self._json_response({
-                    "ai_percentage": score["score"],
-                    "ai_sentences": 0,
-                    "human_sentences": len(re.split(r'[.!?]+', text)),
-                    "text_length": len(text),
-                    "is_human": 1 if score["score"] < 50 else 0,
-                    "source": "internal",
-                    "error": f"ZeroGPT unavailable: {str(e)[:100]}"
-                })
-                return
-            
-            if data.get("success"):
-                d = data.get("data", {})
-                self._json_response({
-                    "ai_percentage": d.get("fakePercentage", 0),
-                    "ai_sentences": d.get("aiSentences", 0),
-                    "human_sentences": d.get("humanSentences", 0),
-                    "text_length": d.get("text_length", 0),
-                    "is_human": d.get("isHuman", 0),
-                    "source": "zerogpt"
-                })
-            else:
-                # ZeroGPT returned error (e.g., 403, requires purchase)
-                # Fall back to internal scoring
-                score = calc_detection_score(text)
-                self._json_response({
-                    "ai_percentage": score["score"],
-                    "ai_sentences": 0,
-                    "human_sentences": len(re.split(r'[.!?]+', text)),
-                    "text_length": len(text),
-                    "is_human": 1 if score["score"] < 50 else 0,
-                    "source": "internal",
-                    "note": f"ZeroGPT unavailable: {data.get('message', 'API error')}"
-                })
-        except Exception as e:
-            self._json_response({"error": str(e)[:200]}, 500)
-
-    def _handle_readability(self):
-        """Calculate Flesch-Kincaid readability metrics."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            fk = calc_flesch_kincaid(text)
-            self._json_response(fk)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_grammar(self):
-        """Check grammar using LanguageTool API."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")[:5000]
-            result = check_grammar_languagetool(text)
-            self._json_response(result)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_variants(self):
-        """Generate 3 output variants, pick best."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            passes = body.get("passes", 3)
-            model = body.get("model", None)
-            tone = body.get("tone", "casual")
-            num = body.get("num_variants", 3)
-            if not text:
-                self._json_response({"error": "No text"}, 400)
-                return
-            job_id = str(uuid.uuid4())[:8]
-            input_words = len(text.split())
-            with JOBS_LOCK:
-                JOBS[job_id] = {
-                    "status": "processing",
-                    "progress": 0,
-                    "chunks_done": 0,
-                    "chunks_total": num,
-                    "partial": "",
-                    "result": None,
-                    "error": None,
-                    "time": None,
-                    "input_words": input_words,
-                    "output_words": 0,
-                    "input_score": calc_detection_score(text),
-                    "output_score": None,
-                    "start_time": time.time(),
-                    "model": model or LLM_MODEL,
-                    "type": "variants",
-                }
-            def run_variants():
-                t0 = time.time()
-                try:
-                    result = humanize_variants(text, passes, model, tone, num)
-                    best = result["best"]
-                    elapsed = round(time.time() - t0, 1)
-                    output_score = calc_detection_score(best["text"])
-                    with JOBS_LOCK:
-                        JOBS[job_id].update({
-                            "status": "done",
-                            "progress": 100,
-                            "chunks_done": num,
-                            "result": result,
-                            "partial": best["text"],
-                            "time": elapsed,
-                            "output_words": best["words"],
-                            "output_score": output_score,
-                        })
-                    send_webhook("job_complete", {"job_id": job_id, "score": best["score"], "words": best["words"]})
-                except Exception as e:
-                    with JOBS_LOCK:
-                        JOBS[job_id].update({"status": "error", "error": str(e)})
-            thread = threading.Thread(target=run_variants, daemon=True)
-            thread.start()
-            self._json_response({"job_id": job_id, "type": "variants", "num_variants": num})
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_tone_slider(self):
-        """Get tone settings from 1-10 slider value."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            level = body.get("level", 5)
-            result = get_tone_from_slider(level)
-            self._json_response(result)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_api_docs(self):
-        """Developer API documentation endpoint."""
-        docs = {
-            "name": "HumanizeAI API v5",
-            "version": "5.0",
-            "base_url": "http://localhost:7860",
-            "authentication": "API key required (X-API-Key header)",
-            "endpoints": [
-                {"method": "POST", "path": "/api/humanize", "params": {"text": "string", "model": "string", "tone": "string", "passes": "int"}, "returns": {"job_id": "string"}},
-                {"method": "GET", "path": "/api/progress/{job_id}", "returns": {"status": "string", "progress": "int", "result": "string"}},
-                {"method": "POST", "path": "/api/analyze", "params": {"text": "string"}, "returns": {"score": "int", "grade": "string"}},
-                {"method": "POST", "path": "/api/preview", "params": {"text": "string"}, "returns": {"preview_output": "string"}},
-                {"method": "POST", "path": "/api/variants", "params": {"text": "string", "num": "int"}, "returns": {"variants": [{"text": "string", "score": "int"}]}},
-                {"method": "POST", "path": "/api/tone-slider", "params": {"text": "string", "level": "float 0-1"}, "returns": {"text": "string"}},
-                {"method": "POST", "path": "/api/readability", "params": {"text": "string"}, "returns": {"grade": "float", "reading_ease": "float"}},
-                {"method": "POST", "path": "/api/grammar", "params": {"text": "string"}, "returns": {"issues": [], "total": "int"}},
-            ],
-            "rate_limits": "100 requests/hour per API key",
-        }
-        self._json_response(docs)
-
-    def _handle_style_train(self):
-        """Train writing style from uploaded samples."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            samples = body.get("samples", [])
-            if not samples or len(samples) < 1:
-                self._json_response({"error": "Need at least 1 writing sample"}, 400)
-                return
-            profile = train_style(samples)
-            if not profile:
-                self._json_response({"error": "Could not analyze samples"}, 400)
-                return
-            self._json_response(profile)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_style_analyze(self):
-        """Analyze writing style of given text."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            if not text:
-                self._json_response({"error": "No text"}, 400)
-                return
-            stats = analyze_writing_style(text)
-            self._json_response(stats or {"error": "Could not analyze"})
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_key_generate(self):
-        """Generate a new API key."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            name = body.get("name", "default")
-            rate_limit = body.get("rate_limit", 100)
-            result = generate_api_key(name, rate_limit)
-            self._json_response(result)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_key_revoke(self):
-        """Revoke an API key."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            key_hash = body.get("hash", "")
-            if revoke_api_key(key_hash):
-                self._json_response({"success": True})
-            else:
-                self._json_response({"error": "Key not found"}, 404)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_webhook_register(self):
-        """Register a webhook URL."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            url = body.get("url", "")
-            events = body.get("events", None)
-            if not url:
-                self._json_response({"error": "No URL provided"}, 400)
-                return
-            result = register_webhook(url, events)
-            self._json_response(result)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_webhook_delete(self):
-        """Delete a webhook."""
-        try:
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            webhook_id = body.get("id", "")
-            if delete_webhook(webhook_id):
-                self._json_response({"success": True})
-            else:
-                self._json_response({"error": "Webhook not found"}, 404)
-        except Exception as e:
-            self._json_response({"error": str(e)}, 500)
-
-    def _handle_dev_api(self):
-        """Developer API endpoint with API key authentication."""
-        try:
-            # Check API key from Authorization header
-            auth = self.headers.get("Authorization", "")
-            if auth.startswith("Bearer "):
-                raw_key = auth[7:]
-            else:
-                raw_key = auth
-            valid, msg = validate_api_key(raw_key)
-            if not valid:
-                self._json_response({"error": msg}, 401)
-                return
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length))
-            text = body.get("text", "")
-            passes = body.get("passes", 3)
-            model = body.get("model", None)
-            tone = body.get("tone", "casual")
-            if not text:
-                self._json_response({"error": "No text provided"}, 400)
-                return
-            # Check cache first
-            text_hash = make_text_hash(text, passes, model, tone)
-            cached = fulltext_cache_get(text_hash)
-            if cached:
-                self._json_response({"result": cached["text"], "score": cached["score"], "cached": True, "words": cached["words"]})
-                return
-            # Process synchronously for API
-            t0 = time.time()
-            result = humanize(text, passes=passes, model=model, tone=tone)
-            score = calc_detection_score(result)
-            elapsed = round(time.time() - t0, 1)
-            result_data = {"text": result, "score": score, "words": len(result.split()), "time": elapsed}
-            fulltext_cache_set(text_hash, result_data)
-            self._json_response({
-                "result": result,
-                "score": score["score"],
-                "grade": score["grade"],
-                "input_words": len(text.split()),
-                "output_words": len(result.split()),
-                "time": elapsed,
-                "cached": False,
-            })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 

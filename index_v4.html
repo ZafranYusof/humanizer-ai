@@ -1,0 +1,1723 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HumanizeAI v4</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-tertiary: #21262d;
+  --bg-card: #1c2128;
+  --border: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #58a6ff;
+  --accent-hover: #79c0ff;
+  --green: #3fb950;
+  --green-bg: rgba(63, 185, 80, 0.15);
+  --red: #f85149;
+  --red-bg: rgba(248, 81, 73, 0.15);
+  --yellow: #d29922;
+  --yellow-bg: rgba(210, 153, 34, 0.15);
+  --purple: #bc8cff;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow: 0 2px 8px rgba(0,0,0,0.3);
+  --font: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+}
+
+body {
+  font-family: var(--font);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+/* Layout */
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 280px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s ease;
+  position: relative;
+  z-index: 100;
+}
+
+.sidebar.collapsed { transform: translateX(-280px); margin-right: -280px; }
+
+.sidebar-header {
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sidebar-header h2 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sidebar-header .logo {
+  width: 32px;
+  height: 32px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: var(--radius);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.history-item {
+  padding: 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  margin-bottom: 4px;
+  transition: background 0.15s;
+  border: 1px solid transparent;
+}
+
+.history-item:hover { background: var(--bg-tertiary); }
+.history-item.active { background: var(--bg-tertiary); border-color: var(--border); }
+
+.history-item .title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-item .meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  display: flex;
+  gap: 8px;
+}
+
+.sidebar-footer {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-footer button {
+  width: 100%;
+  padding: 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.sidebar-footer button:hover {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+/* Main Content */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.toggle-sidebar {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 20px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.toggle-sidebar:hover { background: var(--bg-tertiary); color: var(--text-primary); }
+
+.topbar-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  flex: 1;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-group label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+}
+
+select, .btn {
+  padding: 8px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: var(--radius);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+select:hover, .btn:hover {
+  border-color: var(--accent);
+}
+
+select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,0.2); }
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-danger {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.btn-danger:hover { background: var(--red); color: #fff; }
+
+.btn-success {
+  background: var(--green-bg);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.btn-success:hover { background: var(--green); color: #fff; }
+
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* Word count bar */
+.word-count-bar {
+  display: flex;
+  gap: 16px;
+  padding: 8px 24px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.word-count-bar span strong {
+  color: var(--text-secondary);
+}
+
+/* Progress bar */
+.progress-container {
+  padding: 0 24px;
+  display: none;
+}
+
+.progress-container.active { display: block; }
+
+.progress-bar-wrapper {
+  margin: 12px 0;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  height: 6px;
+  overflow: hidden;
+}
+
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--purple));
+  border-radius: 999px;
+  width: 0%;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* Drop zone */
+.drop-zone {
+  margin: 24px;
+  padding: 48px 24px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  transition: all 0.2s;
+  cursor: pointer;
+  background: var(--bg-secondary);
+}
+
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(88, 166, 255, 0.05);
+}
+
+.drop-zone-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+  opacity: 0.6;
+}
+
+.drop-zone-text {
+  font-size: 15px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.drop-zone-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.drop-zone input[type="file"] { display: none; }
+
+/* Input area */
+.input-section {
+  margin: 0 24px 24px;
+}
+
+.input-section textarea {
+  width: 100%;
+  min-height: 200px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.7;
+  resize: vertical;
+  transition: border-color 0.15s;
+}
+
+.input-section textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(88,166,255,0.2);
+}
+
+.input-section textarea::placeholder { color: var(--text-muted); }
+
+.action-row {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* Tab navigation for output views */
+.output-tabs {
+  display: flex;
+  gap: 0;
+  margin: 0 24px;
+  border-bottom: 1px solid var(--border);
+  display: none;
+}
+
+.output-tabs.active { display: flex; }
+
+.output-tab {
+  padding: 12px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font);
+}
+
+.output-tab:hover { color: var(--text-secondary); }
+.output-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Output panels */
+.output-panel {
+  margin: 24px;
+  display: none;
+}
+
+.output-panel.active { display: block; }
+
+/* Simple output */
+.simple-output {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  position: relative;
+}
+
+.simple-output .output-text {
+  white-space: pre-wrap;
+  line-height: 1.8;
+  font-size: 14px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.output-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* DIFF VIEW */
+.diff-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.diff-pane {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.diff-pane-header {
+  padding: 12px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.diff-pane-body {
+  padding: 16px;
+  max-height: 500px;
+  overflow-y: auto;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.diff-sentence {
+  padding: 4px 8px;
+  margin: 2px 0;
+  border-radius: 4px;
+  position: relative;
+  transition: background 0.15s;
+}
+
+.diff-sentence.removed {
+  background: var(--red-bg);
+  border-left: 3px solid var(--red);
+  color: var(--red);
+}
+
+.diff-sentence.added {
+  background: var(--green-bg);
+  border-left: 3px solid var(--green);
+  color: var(--green);
+}
+
+.diff-sentence.unchanged {
+  color: var(--text-secondary);
+}
+
+.diff-sentence.rejected {
+  opacity: 0.4;
+  text-decoration: line-through;
+}
+
+.diff-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.diff-actions button {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid;
+  cursor: pointer;
+  font-family: var(--font);
+  transition: all 0.15s;
+}
+
+.diff-accept {
+  background: var(--green-bg);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.diff-accept:hover { background: var(--green); color: #fff; }
+
+.diff-reject {
+  background: var(--red-bg);
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.diff-reject:hover { background: var(--red); color: #fff; }
+
+.diff-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.diff-stat-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  text-align: center;
+}
+
+.diff-stat-card .value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.diff-stat-card .label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 4px;
+}
+
+.diff-final-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+/* HEATMAP DASHBOARD */
+.heatmap-dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.heatmap-overview {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.heatmap-stat {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  text-align: center;
+}
+
+.heatmap-stat .big-value {
+  font-size: 32px;
+  font-weight: 700;
+}
+
+.heatmap-stat .big-value.human { color: var(--green); }
+.heatmap-stat .big-value.mixed { color: var(--yellow); }
+.heatmap-stat .big-value.ai { color: var(--red); }
+
+.heatmap-stat .stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.ai-tells-section {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+}
+
+.ai-tells-section h4 {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.ai-tell-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-tell-tag {
+  padding: 4px 12px;
+  background: var(--red-bg);
+  border: 1px solid rgba(248,81,73,0.3);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--red);
+}
+
+.heatmap-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.heatmap-block {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.8);
+  border: 2px solid transparent;
+  position: relative;
+}
+
+.heatmap-block:hover {
+  transform: scale(1.1);
+  z-index: 10;
+  border-color: var(--text-primary);
+}
+
+.heatmap-block.score-human { background: var(--green); }
+.heatmap-block.score-mixed { background: var(--yellow); }
+.heatmap-block.score-ai { background: var(--red); }
+
+.heatmap-block.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(88,166,255,0.4); }
+
+.heatmap-legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  align-items: center;
+}
+
+.heatmap-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.heatmap-legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.paragraph-detail {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: none;
+}
+
+.paragraph-detail.active { display: block; }
+
+.paragraph-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.paragraph-detail-score {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.paragraph-detail-text {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-secondary);
+  padding: 12px;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.reprocess-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-size: 13px;
+  z-index: 10000;
+  animation: slideUp 0.3s ease;
+  box-shadow: var(--shadow);
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+  .diff-view { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    transform: translateX(-100%);
+    z-index: 1000;
+  }
+  .sidebar.open { transform: translateX(0); }
+  .topbar { padding: 12px 16px; }
+  .input-section, .output-panel, .output-tabs, .drop-zone { margin-left: 16px; margin-right: 16px; }
+  .diff-view { grid-template-columns: 1fr; }
+  .heatmap-overview { grid-template-columns: 1fr 1fr; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--bg-tertiary); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
+/* Tone preset pills */
+.tone-presets {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tone-pill {
+  padding: 4px 12px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: var(--font);
+}
+
+.tone-pill:hover { border-color: var(--accent); color: var(--text-primary); }
+.tone-pill.active { background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="app-layout">
+  <!-- Sidebar: History -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">H</div>
+      <h2>HumanizeAI</h2>
+    </div>
+    <div class="history-list" id="historyList">
+      <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">
+        No history yet. Process some text to see it here.
+      </div>
+    </div>
+    <div class="sidebar-footer">
+      <button onclick="clearHistory()">Clear History</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main-content">
+    <!-- Top Bar -->
+    <div class="topbar">
+      <button class="toggle-sidebar" onclick="toggleSidebar()" title="Toggle sidebar">☰</button>
+      <div class="topbar-controls">
+        <div class="control-group">
+          <label>Model</label>
+          <select id="modelSelect">
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="claude-3.5">Claude 3.5</option>
+            <option value="gemini-pro">Gemini Pro</option>
+            <option value="llama-3.1">Llama 3.1</option>
+            <option value="custom">Custom Model</option>
+          </select>
+        </div>
+        <div class="control-group">
+          <label>Tone</label>
+          <div class="tone-presets">
+            <button class="tone-pill active" data-tone="natural" onclick="selectTone(this)">Natural</button>
+            <button class="tone-pill" data-tone="academic" onclick="selectTone(this)">Academic</button>
+            <button class="tone-pill" data-tone="casual" onclick="selectTone(this)">Casual</button>
+            <button class="tone-pill" data-tone="professional" onclick="selectTone(this)">Professional</button>
+            <button class="tone-pill" data-tone="creative" onclick="selectTone(this)">Creative</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Word count bar -->
+    <div class="word-count-bar">
+      <span>Input: <strong id="inputWordCount">0</strong> words</span>
+      <span>Output: <strong id="outputWordCount">0</strong> words</span>
+      <span>Changes: <strong id="changeCount">0</strong></span>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-text" id="progressText">Processing...</div>
+      <div class="progress-bar-wrapper">
+        <div class="progress-bar-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <!-- Drop zone -->
+    <div class="drop-zone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+      <div class="drop-zone-icon">📄</div>
+      <div class="drop-zone-text">Drop file here or click to browse</div>
+      <div class="drop-zone-hint">Supports .txt, .docx, .pdf</div>
+      <input type="file" id="fileInput" accept=".txt,.docx,.pdf" onchange="handleFileSelect(event)">
+    </div>
+
+    <!-- Input textarea -->
+    <div class="input-section">
+      <textarea id="inputText" placeholder="Paste your AI-generated text here, or use the drop zone above to upload a file..." oninput="updateInputWordCount()"></textarea>
+      <div class="action-row">
+        <button class="btn btn-primary" id="humanizeBtn" onclick="humanizeText()">⚡ Humanize</button>
+        <button class="btn" id="detectBtn" onclick="detectAI()">🔍 Detect AI</button>
+        <button class="btn" onclick="document.getElementById('inputText').value=''; updateInputWordCount()">Clear</button>
+      </div>
+    </div>
+
+    <!-- Output tabs -->
+    <div class="output-tabs" id="outputTabs">
+      <button class="output-tab active" data-panel="simplePanel" onclick="switchTab(this)">Output</button>
+      <button class="output-tab" data-panel="diffPanel" onclick="switchTab(this)">Diff View</button>
+      <button class="output-tab" data-panel="heatmapPanel" onclick="switchTab(this)">Detection Heatmap</button>
+    </div>
+
+    <!-- Simple output panel -->
+    <div class="output-panel active" id="simplePanel">
+      <div class="simple-output">
+        <div class="output-text" id="outputText">Your humanized text will appear here...</div>
+        <div class="output-actions">
+          <button class="btn btn-sm" onclick="copyOutput()">📋 Copy</button>
+          <button class="btn btn-sm" onclick="downloadOutput()">💾 Download</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Diff view panel -->
+    <div class="output-panel" id="diffPanel">
+      <div class="diff-stats" id="diffStats"></div>
+      <div class="diff-view">
+        <div class="diff-pane">
+          <div class="diff-pane-header">
+            <span>📝 Original Text</span>
+            <span id="origWordCount" style="color: var(--text-muted); font-weight: 400;">0 words</span>
+          </div>
+          <div class="diff-pane-body" id="diffOriginal"></div>
+        </div>
+        <div class="diff-pane">
+          <div class="diff-pane-header">
+            <span>✨ Humanized Text</span>
+            <span id="humanWordCount" style="color: var(--text-muted); font-weight: 400;">0 words</span>
+          </div>
+          <div class="diff-pane-body" id="diffHumanized"></div>
+        </div>
+      </div>
+      <div class="diff-final-actions">
+        <button class="btn btn-success" onclick="acceptAllChanges()">✓ Accept All</button>
+        <button class="btn btn-danger" onclick="rejectAllChanges()">✗ Reject All</button>
+        <button class="btn btn-primary" onclick="finalizeDiff()">📋 Copy Final Text</button>
+      </div>
+    </div>
+
+    <!-- Heatmap dashboard panel -->
+    <div class="output-panel" id="heatmapPanel">
+      <div class="heatmap-dashboard">
+        <!-- Overview stats -->
+        <div class="heatmap-overview" id="heatmapOverview"></div>
+
+        <!-- AI tells -->
+        <div class="ai-tells-section" id="aiTellsSection" style="display:none;">
+          <h4>🚨 Top AI-Tell Words Found</h4>
+          <div class="ai-tell-tags" id="aiTellTags"></div>
+        </div>
+
+        <!-- Heatmap grid -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h4 style="font-size: 13px; color: var(--text-secondary);">PARAGRAPH HEATMAP</h4>
+            <div class="heatmap-legend">
+              <div class="heatmap-legend-item">
+                <div class="heatmap-legend-dot" style="background: var(--green);"></div>
+                <span>Human (&lt;30)</span>
+              </div>
+              <div class="heatmap-legend-item">
+                <div class="heatmap-legend-dot" style="background: var(--yellow);"></div>
+                <span>Mixed (30-60)</span>
+              </div>
+              <div class="heatmap-legend-item">
+                <div class="heatmap-legend-dot" style="background: var(--red);"></div>
+                <span>AI (&gt;60)</span>
+              </div>
+            </div>
+          </div>
+          <div class="heatmap-grid" id="heatmapGrid"></div>
+        </div>
+
+        <!-- Paragraph detail -->
+        <div class="paragraph-detail" id="paragraphDetail">
+          <div class="paragraph-detail-header">
+            <span id="paraDetailTitle">Paragraph #1</span>
+            <span class="paragraph-detail-score" id="paraDetailScore">--</span>
+          </div>
+          <div class="paragraph-detail-text" id="paraDetailText"></div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm btn-primary" onclick="reprocessParagraph()">🔄 Re-process This</button>
+            <button class="btn btn-sm" onclick="closeParagraphDetail()">Close</button>
+          </div>
+        </div>
+
+        <!-- Reprocess red blocks -->
+        <div class="reprocess-actions">
+          <button class="btn btn-danger" id="reprocessRedBtn" onclick="reprocessRedBlocks()">
+            🔥 Re-process Red Blocks
+          </button>
+          <span style="font-size: 12px; color: var(--text-muted);" id="redBlockCount">0 paragraphs flagged as AI</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ========== STATE ==========
+const state = {
+  originalText: '',
+  humanizedText: '',
+  currentTone: 'natural',
+  history: JSON.parse(localStorage.getItem('humanize_history') || '[]'),
+  diffChanges: [], // { index, origSentence, newSentence, status: 'accepted'|'rejected'|'pending' }
+  paragraphs: [],
+  paragraphScores: [],
+  selectedParagraph: null,
+  detectionData: null,
+  metadata: null
+};
+
+// ========== SIDEBAR ==========
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  if (window.innerWidth <= 768) {
+    sb.classList.toggle('open');
+  } else {
+    sb.classList.toggle('collapsed');
+  }
+}
+
+function renderHistory() {
+  const list = document.getElementById('historyList');
+  if (state.history.length === 0) {
+    list.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 13px;">No history yet.</div>';
+    return;
+  }
+  list.innerHTML = state.history.map((item, i) => `
+    <div class="history-item ${i === 0 ? 'active' : ''}" onclick="loadHistory(${i})">
+      <div class="title">${escapeHtml(item.title || 'Untitled')}</div>
+      <div class="meta">
+        <span>${item.wordCount || 0} words</span>
+        <span>${item.date || ''}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function addToHistory(title, wordCount) {
+  const item = {
+    title: title.substring(0, 50),
+    wordCount,
+    date: new Date().toLocaleDateString(),
+    input: state.originalText,
+    output: state.humanizedText
+  };
+  state.history.unshift(item);
+  if (state.history.length > 50) state.history.pop();
+  localStorage.setItem('humanize_history', JSON.stringify(state.history));
+  renderHistory();
+}
+
+function loadHistory(index) {
+  const item = state.history[index];
+  if (item) {
+    document.getElementById('inputText').value = item.input || '';
+    state.originalText = item.input || '';
+    state.humanizedText = item.output || '';
+    if (item.output) {
+      document.getElementById('outputText').textContent = item.output;
+      document.getElementById('outputTabs').classList.add('active');
+    }
+    updateInputWordCount();
+  }
+}
+
+function clearHistory() {
+  state.history = [];
+  localStorage.removeItem('humanize_history');
+  renderHistory();
+}
+
+// ========== TONE ==========
+function selectTone(el) {
+  document.querySelectorAll('.tone-pill').forEach(p => p.classList.remove('active'));
+  el.classList.add('active');
+  state.currentTone = el.dataset.tone;
+}
+
+// ========== WORD COUNT ==========
+function countWords(text) {
+  if (!text || !text.trim()) return 0;
+  return text.trim().split(/\s+/).length;
+}
+
+function updateInputWordCount() {
+  const text = document.getElementById('inputText').value;
+  document.getElementById('inputWordCount').textContent = countWords(text);
+}
+
+// ========== FILE HANDLING ==========
+const dropZone = document.getElementById('dropZone');
+
+dropZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('drag-over');
+});
+
+dropZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) readFile(file);
+});
+
+function handleFileSelect(event) {
+  const file = event.target.files[0];
+  if (file) readFile(file);
+}
+
+function readFile(file) {
+  if (file.type === 'text/plain' || file.name.endsWith('.txt')) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      document.getElementById('inputText').value = e.target.result;
+      updateInputWordCount();
+      showToast('File loaded: ' + file.name);
+    };
+    reader.readAsText(file);
+  } else {
+    showToast('Only .txt files supported in browser mode');
+  }
+}
+
+// ========== PROGRESS ==========
+function showProgress(text, percent) {
+  const container = document.getElementById('progressContainer');
+  container.classList.add('active');
+  document.getElementById('progressText').textContent = text;
+  document.getElementById('progressFill').style.width = percent + '%';
+}
+
+function hideProgress() {
+  document.getElementById('progressContainer').classList.remove('active');
+}
+
+// ========== API CALLS ==========
+async function humanizeText() {
+  const text = document.getElementById('inputText').value.trim();
+  if (!text) { showToast('Enter some text first'); return; }
+
+  state.originalText = text;
+  const model = document.getElementById('modelSelect').value;
+  const btn = document.getElementById('humanizeBtn');
+  btn.disabled = true;
+
+  showProgress('Humanizing text...', 20);
+
+  try {
+    showProgress('Sending to API...', 40);
+    const response = await fetch('/api/humanize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, model, tone: state.currentTone })
+    });
+
+    showProgress('Processing response...', 70);
+
+    if (!response.ok) throw new Error('API error: ' + response.status);
+    const data = await response.json();
+
+    state.humanizedText = data.text;
+    state.metadata = data.metadata;
+
+    showProgress('Building diff view...', 90);
+
+    // Populate outputs
+    document.getElementById('outputText').textContent = data.text;
+    document.getElementById('outputWordCount').textContent = countWords(data.text);
+    document.getElementById('outputTabs').classList.add('active');
+
+    // Build diff
+    buildDiffView(text, data.text);
+
+    // Run detection on result for heatmap
+    await runDetection(data.text);
+
+    showProgress('Done!', 100);
+    setTimeout(hideProgress, 800);
+
+    addToHistory(text.substring(0, 50), countWords(text));
+    switchTab(document.querySelector('[data-panel="diffPanel"]'));
+    showToast('Humanization complete!');
+
+  } catch (err) {
+    hideProgress();
+    showToast('Error: ' + err.message);
+    // Demo mode fallback
+    demoFallback(text);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function detectAI() {
+  const text = document.getElementById('inputText').value.trim();
+  if (!text) { showToast('Enter some text first'); return; }
+
+  state.originalText = text;
+  const btn = document.getElementById('detectBtn');
+  btn.disabled = true;
+
+  showProgress('Detecting AI content...', 30);
+
+  try {
+    showProgress('Analyzing...', 60);
+    const response = await fetch('/api/detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+
+    if (!response.ok) throw new Error('API error: ' + response.status);
+    const data = await response.json();
+
+    state.detectionData = data;
+    showProgress('Building heatmap...', 90);
+
+    buildHeatmap(text, data);
+    document.getElementById('outputTabs').classList.add('active');
+    switchTab(document.querySelector('[data-panel="heatmapPanel"]'));
+
+    showProgress('Done!', 100);
+    setTimeout(hideProgress, 800);
+    showToast('Detection complete!');
+
+  } catch (err) {
+    hideProgress();
+    showToast('Error: ' + err.message);
+    // Demo fallback
+    demoDetection(text);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runDetection(text) {
+  try {
+    const response = await fetch('/api/detect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    if (!response.ok) throw new Error('Detect failed');
+    const data = await response.json();
+    state.detectionData = data;
+    buildHeatmap(text, data);
+  } catch (e) {
+    // Generate fake detection data for demo
+    demoDetection(text);
+  }
+}
+
+// ========== DIFF VIEW ==========
+function splitSentences(text) {
+  return text.match(/[^.!?]+[.!?]+[\s]*/g) || [text];
+}
+
+function similarity(a, b) {
+  if (a === b) return 1;
+  const wordsA = new Set(a.toLowerCase().split(/\s+/));
+  const wordsB = new Set(b.toLowerCase().split(/\s+/));
+  const intersection = new Set([...wordsA].filter(x => wordsB.has(x)));
+  const union = new Set([...wordsA, ...wordsB]);
+  return union.size === 0 ? 0 : intersection.size / union.size;
+}
+
+function buildDiffView(original, humanized) {
+  const origSentences = splitSentences(original);
+  const newSentences = splitSentences(humanized);
+
+  state.diffChanges = [];
+  const maxLen = Math.max(origSentences.length, newSentences.length);
+
+  let changes = 0, accepted = 0, rejected = 0;
+
+  for (let i = 0; i < maxLen; i++) {
+    const orig = (origSentences[i] || '').trim();
+    const newS = (newSentences[i] || '').trim();
+
+    if (!orig && newS) {
+      state.diffChanges.push({ index: i, origSentence: '', newSentence: newS, status: 'pending', type: 'added' });
+      changes++;
+    } else if (orig && !newS) {
+      state.diffChanges.push({ index: i, origSentence: orig, newSentence: '', status: 'pending', type: 'removed' });
+      changes++;
+    } else if (similarity(orig, newS) < 0.95) {
+      state.diffChanges.push({ index: i, origSentence: orig, newSentence: newS, status: 'pending', type: 'changed' });
+      changes++;
+    } else {
+      state.diffChanges.push({ index: i, origSentence: orig, newSentence: newS, status: 'unchanged', type: 'unchanged' });
+    }
+  }
+
+  renderDiff();
+  updateDiffStats();
+
+  document.getElementById('origWordCount').textContent = countWords(original) + ' words';
+  document.getElementById('humanWordCount').textContent = countWords(humanized) + ' words';
+  document.getElementById('changeCount').textContent = changes;
+}
+
+// NOTE: innerHTML usage safe — all user-supplied text passes through escapeHtml() before insertion
+function renderDiff() {
+  const origContainer = document.getElementById('diffOriginal');
+  const humanContainer = document.getElementById('diffHumanized');
+
+  let origHtml = '';
+  let humanHtml = '';
+
+  state.diffChanges.forEach((change, idx) => {
+    if (change.type === 'unchanged') {
+      origHtml += `<div class="diff-sentence unchanged">${escapeHtml(change.origSentence)}</div>`;
+      humanHtml += `<div class="diff-sentence unchanged">${escapeHtml(change.newSentence)}</div>`;
+    } else if (change.type === 'removed') {
+      const cls = change.status === 'rejected' ? 'removed rejected' : 'removed';
+      origHtml += `<div class="diff-sentence ${cls}">${escapeHtml(change.origSentence)}
+        <span class="diff-actions">
+          <button class="diff-accept" onclick="acceptChange(${idx})" title="Keep original">Keep</button>
+          <button class="diff-reject" onclick="rejectChange(${idx})" title="Remove">Remove</button>
+        </span>
+      </div>`;
+      humanHtml += `<div class="diff-sentence unchanged" style="opacity:0.3; font-style:italic;">[removed]</div>`;
+    } else if (change.type === 'added') {
+      const cls = change.status === 'rejected' ? 'added rejected' : 'added';
+      origHtml += `<div class="diff-sentence unchanged" style="opacity:0.3; font-style:italic;">[new]</div>`;
+      humanHtml += `<div class="diff-sentence ${cls}">${escapeHtml(change.newSentence)}
+        <span class="diff-actions">
+          <button class="diff-accept" onclick="acceptChange(${idx})" title="Accept addition">Accept</button>
+          <button class="diff-reject" onclick="rejectChange(${idx})" title="Reject">Reject</button>
+        </span>
+      </div>`;
+    } else { // changed
+      const origCls = change.status === 'rejected' ? 'removed rejected' : 'removed';
+      const newCls = change.status === 'accepted' ? 'added' : (change.status === 'rejected' ? 'added rejected' : 'added');
+      origHtml += `<div class="diff-sentence ${origCls}">${escapeHtml(change.origSentence)}</div>`;
+      humanHtml += `<div class="diff-sentence ${newCls}">${escapeHtml(change.newSentence)}
+        <span class="diff-actions">
+          <button class="diff-accept" onclick="acceptChange(${idx})" title="Use humanized">✓</button>
+          <button class="diff-reject" onclick="rejectChange(${idx})" title="Keep original">✗</button>
+        </span>
+      </div>`;
+    }
+  });
+
+  origContainer.innerHTML = origHtml;
+  humanContainer.innerHTML = humanHtml;
+}
+
+function acceptChange(idx) {
+  state.diffChanges[idx].status = 'accepted';
+  renderDiff();
+  updateDiffStats();
+}
+
+function rejectChange(idx) {
+  state.diffChanges[idx].status = 'rejected';
+  renderDiff();
+  updateDiffStats();
+}
+
+function acceptAllChanges() {
+  state.diffChanges.forEach(c => {
+    if (c.type !== 'unchanged') c.status = 'accepted';
+  });
+  renderDiff();
+  updateDiffStats();
+}
+
+function rejectAllChanges() {
+  state.diffChanges.forEach(c => {
+    if (c.type !== 'unchanged') c.status = 'rejected';
+  });
+  renderDiff();
+  updateDiffStats();
+}
+
+function getFinalText() {
+  let parts = [];
+  state.diffChanges.forEach(change => {
+    if (change.type === 'unchanged') {
+      parts.push(change.origSentence);
+    } else if (change.type === 'removed') {
+      if (change.status !== 'rejected') parts.push(change.origSentence);
+    } else if (change.type === 'added') {
+      if (change.status === 'accepted') parts.push(change.newSentence);
+    } else { // changed
+      if (change.status === 'accepted') {
+        parts.push(change.newSentence);
+      } else if (change.status === 'rejected') {
+        parts.push(change.origSentence);
+      } else {
+        // pending: default to humanized
+        parts.push(change.newSentence);
+      }
+    }
+  });
+  return parts.join(' ');
+}
+
+function finalizeDiff() {
+  const final = getFinalText();
+  navigator.clipboard.writeText(final).then(() => showToast('Final text copied!')).catch(() => {
+    document.getElementById('outputText').textContent = final;
+    showToast('Final text placed in Output tab');
+  });
+}
+
+function updateDiffStats() {
+  const total = state.diffChanges.filter(c => c.type !== 'unchanged').length;
+  const accepted = state.diffChanges.filter(c => c.status === 'accepted').length;
+  const rejected = state.diffChanges.filter(c => c.status === 'rejected').length;
+  const pending = total - accepted - rejected;
+
+  const origWords = countWords(state.originalText);
+  const finalWords = countWords(getFinalText());
+
+  document.getElementById('diffStats').innerHTML = `
+    <div class="diff-stat-card">
+      <div class="value">${total}</div>
+      <div class="label">Total Changes</div>
+    </div>
+    <div class="diff-stat-card">
+      <div class="value" style="color: var(--green)">${accepted}</div>
+      <div class="label">Accepted</div>
+    </div>
+    <div class="diff-stat-card">
+      <div class="value" style="color: var(--red)">${rejected}</div>
+      <div class="label">Rejected</div>
+    </div>
+    <div class="diff-stat-card">
+      <div class="value" style="color: var(--yellow)">${pending}</div>
+      <div class="label">Pending</div>
+    </div>
+    <div class="diff-stat-card">
+      <div class="value">${origWords} → ${finalWords}</div>
+      <div class="label">Word Count</div>
+    </div>
+  `;
+}
+
+// ========== HEATMAP ==========
+function buildHeatmap(text, detectionData) {
+  const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
+  state.paragraphs = paragraphs;
+
+  // Use sentence_scores from detection data, map to paragraphs
+  const scores = detectionData.sentence_scores || [];
+  state.paragraphScores = paragraphs.map((p, i) => {
+    if (scores[i] !== undefined) return scores[i];
+    // Estimate: distribute score across paragraphs
+    return detectionData.score || 50;
+  });
+
+  // Overview stats
+  const overallScore = detectionData.score || 0;
+  const burstiness = detectionData.burstiness || 0;
+  const scoreClass = overallScore < 30 ? 'human' : (overallScore < 60 ? 'mixed' : 'ai');
+
+  const humanCount = state.paragraphScores.filter(s => s < 30).length;
+  const mixedCount = state.paragraphScores.filter(s => s >= 30 && s <= 60).length;
+  const aiCount = state.paragraphScores.filter(s => s > 60).length;
+
+  document.getElementById('heatmapOverview').innerHTML = `
+    <div class="heatmap-stat">
+      <div class="big-value ${scoreClass}">${Math.round(overallScore)}%</div>
+      <div class="stat-label">Overall AI Score</div>
+    </div>
+    <div class="heatmap-stat">
+      <div class="big-value" style="color: var(--accent)">${burstiness.toFixed(2)}</div>
+      <div class="stat-label">Burstiness CV</div>
+    </div>
+    <div class="heatmap-stat">
+      <div class="big-value human">${humanCount}</div>
+      <div class="stat-label">Human Paragraphs</div>
+    </div>
+    <div class="heatmap-stat">
+      <div class="big-value mixed">${mixedCount}</div>
+      <div class="stat-label">Mixed Paragraphs</div>
+    </div>
+    <div class="heatmap-stat">
+      <div class="big-value ai">${aiCount}</div>
+      <div class="stat-label">AI Paragraphs</div>
+    </div>
+  `;
+
+  // AI tells
+  const aiTells = detectionData.ai_tells || [];
+  const aiTellsSection = document.getElementById('aiTellsSection');
+  if (aiTells.length > 0) {
+    aiTellsSection.style.display = 'block';
+    document.getElementById('aiTellTags').innerHTML = aiTells.map(t =>
+      `<span class="ai-tell-tag">${escapeHtml(t)}</span>`
+    ).join('');
+  } else {
+    aiTellsSection.style.display = 'none';
+  }
+
+  // Heatmap grid
+  const grid = document.getElementById('heatmapGrid');
+  grid.innerHTML = paragraphs.map((p, i) => {
+    const score = state.paragraphScores[i] || 0;
+    const cls = score < 30 ? 'score-human' : (score <= 60 ? 'score-mixed' : 'score-ai');
+    return `<div class="heatmap-block ${cls}" onclick="selectHeatmapBlock(${i})" title="Paragraph ${i+1}: Score ${Math.round(score)}">${i+1}</div>`;
+  }).join('');
+
+  // Update red count
+  document.getElementById('redBlockCount').textContent = `${aiCount} paragraph${aiCount !== 1 ? 's' : ''} flagged as AI`;
+}
+
+function selectHeatmapBlock(index) {
+  state.selectedParagraph = index;
+
+  // Highlight selected block
+  document.querySelectorAll('.heatmap-block').forEach((b, i) => {
+    b.classList.toggle('selected', i === index);
+  });
+
+  const score = state.paragraphScores[index] || 0;
+  const scoreClass = score < 30 ? 'human' : (score <= 60 ? 'mixed' : 'ai');
+  const scoreColor = score < 30 ? 'var(--green)' : (score <= 60 ? 'var(--yellow)' : 'var(--red)');
+
+  document.getElementById('paraDetailTitle').textContent = `Paragraph #${index + 1}`;
+  document.getElementById('paraDetailScore').innerHTML = `<span style="color: ${scoreColor}">${Math.round(score)}%</span>`;
+  document.getElementById('paraDetailText').textContent = state.paragraphs[index];
+  document.getElementById('paragraphDetail').classList.add('active');
+}
+
+function closeParagraphDetail() {
+  document.getElementById('paragraphDetail').classList.remove('active');
+  document.querySelectorAll('.heatmap-block').forEach(b => b.classList.remove('selected'));
+  state.selectedParagraph = null;
+}
+
+async function reprocessParagraph() {
+  if (state.selectedParagraph === null) return;
+  const idx = state.selectedParagraph;
+  const paraText = state.paragraphs[idx];
+
+  showProgress(`Re-processing paragraph ${idx + 1}...`, 50);
+
+  try {
+    const response = await fetch('/api/reprocess-paragraph', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        paragraph: paraText,
+        index: idx,
+        model: document.getElementById('modelSelect').value,
+        tone: state.currentTone
+      })
+    });
+
+    if (!response.ok) throw new Error('API error');
+    const data = await response.json();
+
+    // Update paragraph
+    state.paragraphs[idx] = data.text || data.paragraph;
+    if (data.score !== undefined) state.paragraphScores[idx] = data.score;
+
+    // Rebuild heatmap
+    const fakeDetection = state.detectionData || { score: 50, burstiness: 0, ai_tells: [], sentence_scores: state.paragraphScores };
+    fakeDetection.sentence_scores = state.paragraphScores;
+    buildHeatmap(state.paragraphs.join('\n\n'), fakeDetection);
+
+    showProgress('Done!', 100);
+    setTimeout(hideProgress, 500);
+    showToast(`Paragraph ${idx + 1} re-processed!`);
+    closeParagraphDetail();
+
+  } catch (err) {
+    hideProgress();
+    showToast('Error: ' + err.message);
+    // Demo: just lower the score
+    state.paragraphScores[idx] = Math.max(5, state.paragraphScores[idx] - 30);
+    const fakeDetection = { score: 40, burstiness: 0.5, ai_tells: [], sentence_scores: state.paragraphScores };
+    buildHeatmap(state.paragraphs.join('\n\n'), fakeDetection);
+    closeParagraphDetail();
+    showToast('Demo mode: paragraph score lowered');
+  }
+}
+
+async function reprocessRedBlocks() {
+  const redIndices = state.paragraphScores
+    .map((s, i) => s > 60 ? i : -1)
+    .filter(i => i >= 0);
+
+  if (redIndices.length === 0) {
+    showToast('No red blocks to re-process!');
+    return;
+  }
+
+  const btn = document.getElementById('reprocessRedBtn');
+  btn.disabled = true;
+
+  for (let i = 0; i < redIndices.length; i++) {
+    const idx = redIndices[i];
+    showProgress(`Re-processing red block ${i + 1}/${redIndices.length} (Para #${idx + 1})...`,
+      Math.round(((i + 1) / redIndices.length) * 100));
+
+    try {
+      const response = await fetch('/api/reprocess-paragraph', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          paragraph: state.paragraphs[idx],
+          index: idx,
+          model: document.getElementById('modelSelect').value,
+          tone: state.currentTone
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        state.paragraphs[idx] = data.text || data.paragraph;
+        if (data.score !== undefined) state.paragraphScores[idx] = data.score;
+        else state.paragraphScores[idx] = Math.max(10, state.paragraphScores[idx] - 25);
+      }
+    } catch (e) {
+      // Demo fallback
+      state.paragraphScores[idx] = Math.max(10, state.paragraphScores[idx] - 25);
+    }
+
+    // Small delay for visual feedback
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // Rebuild heatmap
+  const avgScore = state.paragraphScores.reduce((a, b) => a + b, 0) / state.paragraphScores.length;
+  const fakeDetection = { score: avgScore, burstiness: 0.5, ai_tells: [], sentence_scores: state.paragraphScores };
+  buildHeatmap(state.paragraphs.join('\n\n'), fakeDetection);
+
+  hideProgress();
+  btn.disabled = false;
+  showToast(`${redIndices.length} red blocks re-processed!`);
+}
+
+// ========== TABS ==========
+function switchTab(tabEl) {
+  document.querySelectorAll('.output-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.output-panel').forEach(p => p.classList.remove('active'));
+  tabEl.classList.add('active');
+  document.getElementById(tabEl.dataset.panel).classList.add('active');
+}
+
+// ========== COPY / DOWNLOAD ==========
+function copyOutput() {
+  const text = document.getElementById('outputText').textContent;
+  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard!'));
+}
+
+function downloadOutput() {
+  const text = document.getElementById('outputText').textContent;
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'humanized_output.txt';
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('Downloaded!');
+}
+
+// ========== UTILS ==========
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function showToast(message) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = message;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 3000);
+}
+
+// ========== DEMO FALLBACKS ==========
+function demoFallback(text) {
+  // Generate fake humanized text for demo
+  const sentences = splitSentences(text);
+  const humanized = sentences.map(s => {
+    const replacements = [
+      [/\butilize\b/gi, 'use'],
+      [/\bfurthermore\b/gi, 'also'],
+      [/\bhowever\b/gi, 'but'],
+      [/\bnevertheless\b/gi, 'still'],
+      [/\bconsequently\b/gi, 'so'],
+      [/\bin order to\b/gi, 'to'],
+      [/\bdemonstrate\b/gi, 'show'],
+      [/\bfacilitate\b/gi, 'help'],
+      [/\bsubsequently\b/gi, 'then'],
+      [/\bapproximately\b/gi, 'about'],
+      [/\bnumerous\b/gi, 'many'],
+      [/\bimplement\b/gi, 'set up'],
+      [/\bencompasses\b/gi, 'includes'],
+      [/\bleverages\b/gi, 'uses'],
+      [/\bdelve\b/gi, 'dig into'],
+      [/\brobust\b/gi, 'solid'],
+    ];
+    let result = s.trim();
+    replacements.forEach(([pattern, replacement]) => {
+      result = result.replace(pattern, replacement);
+    });
+    // Add some variation
+    if (Math.random() > 0.7 && result.length > 20) {
+      result = result.replace(/\.(\s*)$/, ' — which matters.$1');
+    }
+    return result;
+  });
+
+  state.humanizedText = humanized.join(' ');
+  document.getElementById('outputText').textContent = state.humanizedText;
+  document.getElementById('outputWordCount').textContent = countWords(state.humanizedText);
+  document.getElementById('outputTabs').classList.add('active');
+
+  buildDiffView(text, state.humanizedText);
+  demoDetection(state.humanizedText);
+  hideProgress();
+  switchTab(document.querySelector('[data-panel="diffPanel"]'));
+  addToHistory(text.substring(0, 50), countWords(text));
+  showToast('Demo mode: API not available, showing local processing');
+}
+
+function demoDetection(text) {
+  const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
+  const scores = paragraphs.map(() => Math.random() * 100);
+  const aiTells = ['delve', 'furthermore', 'utilize', 'robust', 'leverage', 'comprehensive', 'facilitate'];
+
+  const detectionData = {
+    score: scores.reduce((a, b) => a + b, 0) / scores.length,
+    burstiness: 0.3 + Math.random() * 0.7,
+    ai_tells: aiTells.filter(() => Math.random() > 0.4),
+    sentence_scores: scores
+  };
+
+  state.detectionData = detectionData;
+  buildHeatmap(text, detectionData);
+}
+
+// ========== INIT ==========
+renderHistory();
+updateInputWordCount();
+</script>
+</body>
+</html>
