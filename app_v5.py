@@ -2434,10 +2434,23 @@ HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>HumanizeAI v3</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --accent: #00cc88;
+    --bg: #1a1a1a;
+    --card: #0d1117;
+    --border: #2a2a2a;
+    --text: #e0e0e0;
+    --text-muted: #888;
+  }
+  body { font-family: 'Inter', -apple-system, sans-serif; }
+  h1, h2, h3 { font-family: 'Playfair Display', serif; font-weight: 700; letter-spacing: -0.5px; }
+  .label { font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
+  .mono { font-family: 'JetBrains Mono', monospace; }
   body { font-family: 'Inter', -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
   .layout { display: flex; min-height: 100vh; }
   .sidebar { width: 280px; background: #0d0d0d; border-right: 1px solid #1a1a1a; padding: 16px; overflow-y: auto; flex-shrink: 0; }
@@ -2526,7 +2539,53 @@ HTML = r"""<!DOCTYPE html>
   body.light-mode .btn-secondary { background: #f0f0f0; color: #333; border-color: #ddd; }
   body.light-mode .diff-unchanged { color: #999; }
   body.light-mode .heatmap-paragraph { color: #333; }
-  @media (max-width: 768px) { .panels { grid-template-columns: 1fr; } textarea { height: 250px; } .sidebar { display: none; } }
+
+  /* Micro-animations */
+  button { transition: transform 0.1s, background 0.2s; }
+  button:active { transform: scale(0.96); }
+  .panel, .diff-container, .heatmap-container { animation: slideIn 0.3s ease-out; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeScale { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
+  .stat-value { animation: fadeScale 0.4s ease-out; }
+  /* Glassmorphism for floating elements */
+  .toolbar, .theme-toggle { backdrop-filter: blur(8px); background: rgba(13,17,23,0.8); }
+
+  
+  /* Collapsible sidebar */
+  .sidebar { transition: transform 0.3s ease; transform: translateX(0); }
+  .sidebar.collapsed { transform: translateX(-100%); }
+  .hamburger { position: fixed; top: 12px; left: 12px; z-index: 200; background: rgba(13,17,23,0.8); backdrop-filter: blur(8px); border: 1px solid #2a2a2a; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--text); font-size: 18px; display: none; }
+  @media (max-width: 1024px) {
+    .hamburger { display: block; }
+    .sidebar { position: fixed; left: 0; top: 0; height: 100vh; z-index: 150; box-shadow: 4px 0 12px rgba(0,0,0,0.3); }
+    .sidebar.collapsed { transform: translateX(-100%); }
+    .container { margin-left: 0 !important; }
+  }
+  /* Floating toolbar */
+  .toolbar { position: sticky; top: 0; z-index: 100; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+
+  
+  /* Drag and drop zone */
+  .drop-zone { position: relative; }
+  .drop-zone.dragover { border-color: var(--accent) !important; background: rgba(0,204,136,0.05); }
+  .drop-zone.dragover::after { content: 'Drop files here'; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: var(--accent); font-size: 18px; font-weight: 600; pointer-events: none; }
+  textarea.drop-zone { transition: border-color 0.2s, background 0.2s; }
+
+  
+  /* Step progress indicators */
+  .step-progress { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
+  .step { padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-muted); }
+  .step.done { border-color: var(--accent); color: var(--accent); }
+  .step.active { border-color: var(--accent); color: var(--accent); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .step.error { border-color: #ff4444; color: #ff4444; }
+
+  
+  /* Typewriter effect */
+  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
+  .typewriter-cursor::after { content: '|'; animation: blink 0.8s infinite; color: var(--accent); }
+
+    @media (max-width: 768px) { .panels { grid-template-columns: 1fr; } textarea { height: 250px; } .sidebar { display: none; } }
 </style>
 </head>
 <body>
@@ -2609,6 +2668,7 @@ HTML = r"""<!DOCTYPE html>
       <button class="btn-secondary" onclick="clearAll()">Clear</button>
     </div>
 
+    <div class="step-progress" id="stepProgress" style="display:none;"></div>
     <div class="progress-bar" id="progressBar" style="display:none;">
       <div class="progress-fill" id="progressFill" style="width:0%"></div>
     </div>
@@ -2618,9 +2678,19 @@ HTML = r"""<!DOCTYPE html>
         <div class="panel-label">Input (AI Text)</div>
         <textarea id="input" placeholder="Paste your AI-generated text here..."></textarea>
       </div>
+    </div>
+    <div class="tab-content" id="tab-output">
+      <div class="panel-label">Output (Humanized)</div>
+      <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
+    </div>
+    <div class="tab-content dual" id="tab-both">
+      <div class="panel">
+        <div class="panel-label">Input (AI Text)</div>
+        <textarea id="input-dual" placeholder="Paste AI text here..." oninput="document.getElementById('input').value=this.value"></textarea>
+      </div>
       <div class="panel">
         <div class="panel-label">Output (Humanized)</div>
-        <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
+        <textarea id="output-dual" placeholder="Humanized text..." readonly></textarea>
       </div>
     </div>
 
@@ -2721,7 +2791,17 @@ utilize"></textarea>
         <label style="font-size:11px;color:#888;"><input type="checkbox" id="strictWordCount"> Strict word count (+-5%)</label><br>
         <label style="font-size:11px;color:#888;"><input type="checkbox" id="autoRetry"> Auto-retry if score > 40</label>
       </div>
-      <button class="btn-primary" onclick="saveSettings()" style="margin-top:12px;padding:8px 16px;font-size:12px;">Save</button>
+
+  /* Accent color options */
+  .color-picker { display: flex; gap: 6px; align-items: center; }
+  .color-dot { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color 0.2s; }
+  .color-dot:hover, .color-dot.active { border-color: var(--text); }
+  .color-dot[data-color="green"] { background: #00cc88; }
+  .color-dot[data-color="blue"] { background: #3b82f6; }
+  .color-dot[data-color="purple"] { background: #8b5cf6; }
+  .color-dot[data-color="amber"] { background: #f59e0b; }
+
+          <button class="btn-primary" onclick="saveSettings()" style="margin-top:12px;padding:8px 16px;font-size:12px;">Save</button>
     </div>
     <div id="grammarPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
       <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Grammar Check</h3>
@@ -2779,10 +2859,12 @@ async function humanize() {
   const words = input.split(/\s+/).length;
   const chunks = words <= 300 ? 1 : Math.ceil(words / 150);
 
+  var startTime = Date.now();
   btn.disabled = true;
   output.value = '';
   progressBar.style.display = 'block';
   progressFill.style.width = '2%';
+  output.classList.add('typewriter-cursor');
   status.innerHTML = 'Starting... ' + words + ' words (' + chunks + ' chunk' + (chunks>1?'s':'') + ', parallel)';
 
   try {
@@ -2829,17 +2911,37 @@ async function humanize() {
 
         // Update progress bar with REAL progress
         progressFill.style.width = Math.max(2, prog.progress || 0) + '%';
-        status.innerHTML = 'Processing... ' + (prog.chunks_done || 0) + '/' + (prog.chunks_total || '?') + ' chunks done (' + (prog.progress || 0) + '%)';
+        var cd = prog.chunks_done || 0;
+        var ct = prog.chunks_total || '?';
+        var timeStr = '';
+        if(cd > 0 && typeof ct === 'number') {
+          var elapsed = (Date.now() - startTime) / 1000;
+          var avg = elapsed / cd;
+          var rem = Math.round(avg * (ct - cd));
+          timeStr = ' | ETA: ' + (rem > 60 ? Math.floor(rem/60) + 'm ' + (rem%60) + 's' : rem + 's');
+        }
+        status.innerHTML = 'Processing... ' + cd + '/' + ct + ' chunks (' + (prog.progress || 0) + '%)' + timeStr;
+        var sp = document.getElementById('stepProgress');
+        if(sp && typeof ct === 'number') {
+          sp.style.display = 'flex';
+          var h = '';
+          for(var s=0;s<ct;s++) h += '<span class="' + (s<cd?'step done':(s===cd?'step active':'step')) + '">Chunk ' + (s+1) + '</span>';
+          sp.innerHTML = h;
+        }
 
-        // Show partial results in output textarea
-        if (prog.partial) {
+        // Show partial results (typewriter streaming)
+        if (prog.partial && prog.partial.length > output.value.length) {
           output.value = prog.partial;
+          updateWordCount();
         }
 
         if (prog.status === 'done') {
           done = true;
           progressFill.style.width = '100%';
           output.value = prog.result || prog.partial;
+          output.classList.remove('typewriter-cursor');
+          var sp2 = document.getElementById('stepProgress');
+          if(sp2) sp2.style.display = 'none';
 
           const pct = Math.round((prog.output_words || 0) / (prog.input_words || 1) * 100);
           const pctColor = pct >= 80 ? '#00cc88' : pct >= 60 ? '#ffaa00' : '#ff4444';
@@ -2871,7 +2973,7 @@ async function humanize() {
               '</div>';
           }
 
-          setTimeout(() => { progressBar.style.display = 'none'; progressFill.style.width = '0%'; }, 2000);
+          setTimeout(() => { progressBar.style.display = 'none'; progressFill.style.width = '0%'; var sp=document.getElementById('stepProgress'); if(sp)sp.style.display='none'; }, 2000);
           loadHistory();
           // Show diff and heatmap
           originalText = document.getElementById('input').value;
@@ -3047,6 +3149,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 // Theme toggle
 let darkMode = true;
+function toggleSidebar() {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+}
 function toggleTheme() {
   darkMode = !darkMode;
   document.body.classList.toggle('light-mode', !darkMode);
@@ -3205,6 +3310,11 @@ document.addEventListener('DOMContentLoaded', () => {
   loadHistory();
   loadVersions();
   loadSettings();
+  const savedTab = localStorage.getItem('activeTab') || 'input';
+  const tabBtn = document.querySelector('.tab-btn[onclick*="'+savedTab+'"]');
+  if(tabBtn) tabBtn.click();
+  const savedAccent = localStorage.getItem('accentColor');
+  if(savedAccent) setAccentColor(document.querySelector('.color-dot[data-color="'+savedAccent+'"]'));
   setupRealTimeDetection();
   const zone = document.getElementById('uploadZone');
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.style.borderColor = '#00cc88'; });
