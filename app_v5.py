@@ -47,6 +47,32 @@ CHUNK_SIZE = 400    # bigger chunks = fewer chunks, better context, less overlap
 MIN_LENGTH_RATIO = 0.80
 PARALLEL_CHUNKS = 4  # max concurrent chunk workers
 HISTORY = []  # in-memory history, max 10
+# Full-result cache (same input = instant output)
+RESULT_CACHE = {}  # {key: {output, score, input_words, timestamp}}
+RESULT_CACHE_MAX = 50
+RESULT_CACHE_TTL = 86400  # 24 hours
+
+def _result_cache_key(text, model, tone, passes):
+    import hashlib
+    key_str = f"{text[:1000]}|{model}|{tone}|{passes}"
+    return hashlib.md5(key_str.encode()).hexdigest()
+
+def result_cache_get(key):
+    if key in RESULT_CACHE:
+        entry = RESULT_CACHE[key]
+        if time.time() - entry['timestamp'] < RESULT_CACHE_TTL:
+            return entry
+    return None
+
+def result_cache_set(key, output, score, input_words):
+    if len(RESULT_CACHE) >= RESULT_CACHE_MAX:
+        oldest = min(RESULT_CACHE.items(), key=lambda x: x[1]['timestamp'])
+        del RESULT_CACHE[oldest[0]]
+    RESULT_CACHE[key] = {
+        'output': output, 'score': score,
+        'input_words': input_words, 'timestamp': time.time()
+    }
+
 
 TONE_PRESETS = {
     "academic": "Maintain formal tone but sound human. Use minimal contractions. Add phrases like 'it appears that', 'the evidence suggests', 'one could argue'. Avoid slang.",
@@ -1578,7 +1604,7 @@ def apply_custom_avoid(text):
 
 CITATION_PATTERNS = [
     (r'\[(?:[A-Z][a-z]+(?:\s+(?:et al\.?|&\s+[A-Z][a-z]+))?,\s*\d{4})\]', 'CITE'),
-    (r'\((?:[A-Z][a-z]+(?:\s+(?:et al\.?|&\s+[A-Z][a-z]+))?,\s*\d{4})\)', 'CITE'),
+    (r'\([A-Z][a-z]+(?:\s+(?:et al\.?|&\s+[A-Z][a-z]+))?,\s*\d{4}(?:\s*,\s*(?:p|pp)\.?\s*\d+)?\)', 'CITE'),
     (r'\b(Figure|Table|Section|Fig\.|Tbl\.|Sec\.|Equation|Eq\.|Appendix|App\.|Chapter|Ch\.)\s+\d+(?:\.\d+)*\b', 'REF'),
     (r'\[\d+(?:[,-]\s*\d+)*\]', 'CITNUM'),
     (r'doi[:\.]?\s*10\.\d{4,}/\S+', 'DOI'),
@@ -2085,6 +2111,323 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     return result
 
 
+# ─── Feature: Output Variants (generate 3, pick best) ────────────────
+
+def humanize_variants(text, passes=3, model=None, tone="casual", num_variants=3, progress_cb=None):
+    """Generate multiple variants, return all + best (lowest AI score)."""
+    if model is None:
+        model = LLM_MODEL
+    variants = []
+    for i in range(num_variants):
+        if progress_cb:
+            progress_cb(i, num_variants, f"variant_{i+1}")
+        result = humanize(text, passes=passes, model=model, tone=tone)
+        score = calc_detection_score(result)
+        variants.append({
+            "text": result,
+            "score": score["score"],
+            "grade": score["grade"],
+            "words": len(result.split()),
+            "variant": i + 1,
+        })
+    variants.sort(key=lambda v: v["score"])
+    best = variants[0]
+    if progress_cb:
+        progress_cb(num_variants, num_variants, "done")
+    return {"variants": variants, "best": best}
+
+
+# ─── Feature: Full-text Cache ────────────────────────────────────────
+
+_FULL_TEXT_CACHE = {}
+MAX_CACHE_ENTRIES = 50
+
+def fulltext_cache_get(text_hash):
+    return _FULL_TEXT_CACHE.get(text_hash)
+
+def fulltext_cache_set(text_hash, result_data):
+    global _FULL_TEXT_CACHE
+    if len(_FULL_TEXT_CACHE) >= MAX_CACHE_ENTRIES:
+        oldest_key = next(iter(_FULL_TEXT_CACHE))
+        del _FULL_TEXT_CACHE[oldest_key]
+    _FULL_TEXT_CACHE[text_hash] = result_data
+
+def make_text_hash(text, passes, model, tone):
+    key = f"{text[:2000]}|{passes}|{model}|{tone}"
+    return hashlib.md5(key.encode()).hexdigest()
+
+
+# ─── Feature: Time Estimation ────────────────────────────────────────
+
+MODEL_AVG_TIMES = {
+    "cx/gpt-5.5": 12,
+    "ag/claude-sonnet-4-6": 10,
+    "ag/gemini-3-flash": 5,
+    "ag/gemini-3.5-flash-low": 3,
+    "ag/gpt-oss-120b-medium": 8,
+    "ag/claude-opus-4-6-thinking": 25,
+    "cx/gpt-5.4": 8,
+    "cx/gpt-5.4-mini": 4,
+}
+
+def estimate_time_remaining(input_words, chunks_total, chunks_done, elapsed_so_far, model=None):
+    if chunks_done <= 0 or elapsed_so_far <= 0:
+        model_time = MODEL_AVG_TIMES.get(model or LLM_MODEL, 10)
+        total_est = (input_words / 300) * model_time * 3
+        return {"total_seconds": round(total_est), "remaining_seconds": round(total_est), "elapsed_seconds": 0}
+    avg_chunk_time = elapsed_so_far / chunks_done
+    remaining_chunks = chunks_total - chunks_done
+    remaining_seconds = round(remaining_chunks * avg_chunk_time * 1.1)
+    total_seconds = round(elapsed_so_far + remaining_seconds)
+    return {
+        "total_seconds": total_seconds,
+        "remaining_seconds": remaining_seconds,
+        "elapsed_seconds": round(elapsed_so_far),
+        "avg_chunk_time": round(avg_chunk_time, 1),
+    }
+
+def format_time_remaining(seconds):
+    if seconds <= 0:
+        return "Almost done..."
+    if seconds < 60:
+        return f"{seconds}s left"
+    minutes = seconds // 60
+    secs = seconds % 60
+    if minutes < 60:
+        return f"{minutes} min {secs}s left"
+    hours = minutes // 60
+    mins = minutes % 60
+    return f"{hours}h {mins}m left"
+
+
+# ─── Feature: Tone Slider (1-10 casual to formal) ───────────────────
+
+def get_tone_from_slider(level):
+    level = max(1, min(10, int(level)))
+    if level <= 3:
+        base_tone = "casual"
+        formality = level / 10.0
+    elif level <= 6:
+        base_tone = "business"
+        formality = (level - 3) / 6.0
+    else:
+        base_tone = "academic"
+        formality = (level - 6) / 4.0
+    return {
+        "tone": base_tone,
+        "formality": round(formality, 2),
+        "level": level,
+        "contractions": level <= 5,
+        "fillers": level <= 3,
+        "hedging": level >= 7,
+    }
+
+
+# ─── Feature: Style Training ─────────────────────────────────────────
+
+_STYLE_PROFILES = {}
+
+def analyze_writing_style(text):
+    sentences = re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 3]
+    words = text.split()
+    if not sentences or not words:
+        return None
+    sent_lengths = [len(s.split()) for s in sentences]
+    avg_sent_len = sum(sent_lengths) / len(sent_lengths)
+    word_lengths = [len(w) for w in words]
+    avg_word_len = sum(word_lengths) / len(word_lengths)
+    contraction_count = len(re.findall(r"\b\w+['\u2019]\w+", text))
+    contraction_ratio = contraction_count / max(len(sentences), 1)
+    filler_count = len(re.findall(r'\b(like|you know|I mean|honestly|basically|actually|well|so|look)\b', text, re.I))
+    filler_ratio = filler_count / max(len(words), 1) * 100
+    formal_transitions = len(re.findall(r'\b(Furthermore|Moreover|Additionally|Consequently|However|Therefore)\b', text, re.I))
+    casual_transitions = len(re.findall(r'\b(But|So|Also|Plus|And|Then|Still)\b', text, re.I))
+    paragraphs = text.split('\n\n')
+    para_lengths = [len(p.split()) for p in paragraphs if p.strip()]
+    avg_para_len = sum(para_lengths) / max(len(para_lengths), 1)
+    starters = [s.strip().split()[0].lower() for s in sentences if s.strip()]
+    starter_counter = Counter(starters)
+    top_starters = starter_counter.most_common(5)
+    mean = sum(sent_lengths) / len(sent_lengths)
+    variance = sum((l - mean)**2 for l in sent_lengths) / len(sent_lengths)
+    std = math.sqrt(variance)
+    burstiness_cv = std / mean if mean > 0 else 0
+    unique_words = len(set(w.lower() for w in words))
+    ttr = unique_words / len(words) if words else 0
+    return {
+        "avg_sentence_length": round(avg_sent_len, 1),
+        "avg_word_length": round(avg_word_len, 1),
+        "contraction_ratio": round(contraction_ratio, 2),
+        "filler_ratio": round(filler_ratio, 2),
+        "formal_transitions": formal_transitions,
+        "casual_transitions": casual_transitions,
+        "avg_paragraph_length": round(avg_para_len, 1),
+        "top_starters": top_starters,
+        "burstiness_cv": round(burstiness_cv, 3),
+        "type_token_ratio": round(ttr, 3),
+        "total_words": len(words),
+        "total_sentences": len(sentences),
+    }
+
+def build_style_prompt(style_stats):
+    if not style_stats:
+        return ""
+    parts = []
+    avg_sl = style_stats["avg_sentence_length"]
+    if avg_sl < 12:
+        parts.append("Use short sentences (average ~10 words). Mix with occasional very short ones (3-5 words).")
+    elif avg_sl < 20:
+        parts.append(f"Use medium-length sentences (average ~{int(avg_sl)} words).")
+    else:
+        parts.append(f"Use longer, complex sentences (average ~{int(avg_sl)} words).")
+    if style_stats["contraction_ratio"] > 0.5:
+        parts.append("Use lots of contractions (don't, isn't, it's, we're, they've).")
+    elif style_stats["contraction_ratio"] > 0.2:
+        parts.append("Use moderate contractions.")
+    else:
+        parts.append("Avoid contractions. Use full forms (do not, is not, it is).")
+    if style_stats["filler_ratio"] > 2.0:
+        parts.append("Use filler phrases naturally: 'like', 'you know', 'I mean', 'honestly', 'basically'.")
+    elif style_stats["filler_ratio"] > 0.5:
+        parts.append("Occasionally use casual phrases like 'honestly' or 'I think'.")
+    if style_stats["formal_transitions"] > style_stats["casual_transitions"]:
+        parts.append("Use formal transitions: Furthermore, Moreover, Consequently, However.")
+    else:
+        parts.append("Use casual transitions: But, So, Also, Plus, And.")
+    cv = style_stats["burstiness_cv"]
+    if cv >= 0.7:
+        parts.append("Vary sentence length dramatically - mix very short (3-5 words) with long (25+ words).")
+    elif cv >= 0.4:
+        parts.append("Moderately vary sentence length.")
+    else:
+        parts.append("Keep sentence lengths relatively consistent.")
+    avg_pl = style_stats["avg_paragraph_length"]
+    if avg_pl < 50:
+        parts.append("Use short paragraphs (2-3 sentences each).")
+    elif avg_pl > 150:
+        parts.append("Use longer paragraphs (6-10 sentences each).")
+    return " STYLE MATCHING: " + " ".join(parts)
+
+def train_style(samples):
+    all_stats = []
+    for sample in samples:
+        stats = analyze_writing_style(sample)
+        if stats:
+            all_stats.append(stats)
+    if not all_stats:
+        return None
+    avg_stats = {}
+    numeric_keys = ["avg_sentence_length", "avg_word_length", "contraction_ratio",
+                    "filler_ratio", "formal_transitions", "casual_transitions",
+                    "avg_paragraph_length", "burstiness_cv", "type_token_ratio"]
+    for key in numeric_keys:
+        values = [s[key] for s in all_stats if key in s]
+        avg_stats[key] = round(sum(values) / len(values), 3) if values else 0
+    avg_stats["total_samples"] = len(all_stats)
+    avg_stats["total_words"] = sum(s.get("total_words", 0) for s in all_stats)
+    profile_id = str(uuid.uuid4())[:8]
+    _STYLE_PROFILES[profile_id] = {
+        "id": profile_id,
+        "stats": avg_stats,
+        "prompt_addition": build_style_prompt(avg_stats),
+        "created": datetime.now().isoformat(),
+    }
+    return _STYLE_PROFILES[profile_id]
+
+
+# ─── Feature: Developer API with API Key System ──────────────────────
+
+_API_KEYS = {}
+API_KEY_PREFIX = "hai_"
+
+def generate_api_key(name="default", rate_limit=100):
+    import secrets
+    raw_key = API_KEY_PREFIX + secrets.token_urlsafe(32)
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    _API_KEYS[key_hash] = {
+        "name": name,
+        "created": datetime.now().isoformat(),
+        "requests": 0,
+        "rate_limit": rate_limit,
+        "last_used": None,
+        "key_preview": raw_key[:12] + "...",
+    }
+    return {"key": raw_key, "hash": key_hash, "name": name}
+
+def validate_api_key(raw_key):
+    if not raw_key:
+        return False, "No API key provided"
+    key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
+    if key_hash not in _API_KEYS:
+        return False, "Invalid API key"
+    entry = _API_KEYS[key_hash]
+    now = datetime.now()
+    if entry["last_used"]:
+        last = datetime.fromisoformat(entry["last_used"])
+        if (now - last).total_seconds() > 3600:
+            entry["requests"] = 0
+    if entry["requests"] >= entry["rate_limit"]:
+        return False, f"Rate limit exceeded ({entry['rate_limit']}/hour)"
+    entry["requests"] += 1
+    entry["last_used"] = now.isoformat()
+    return True, "ok"
+
+def list_api_keys():
+    return [{"name": v["name"], "key_preview": v["key_preview"],
+             "created": v["created"], "requests": v["requests"],
+             "rate_limit": v["rate_limit"]} for v in _API_KEYS.values()]
+
+def revoke_api_key(key_hash):
+    if key_hash in _API_KEYS:
+        del _API_KEYS[key_hash]
+        return True
+    return False
+
+
+# ─── Feature: Webhook Notifications ──────────────────────────────────
+
+_WEBHOOKS = {}
+
+def register_webhook(url, events=None):
+    webhook_id = str(uuid.uuid4())[:8]
+    _WEBHOOKS[webhook_id] = {
+        "id": webhook_id,
+        "url": url,
+        "events": events or ["job_complete", "batch_complete"],
+        "active": True,
+        "created": datetime.now().isoformat(),
+    }
+    return _WEBHOOKS[webhook_id]
+
+def send_webhook(event, payload):
+    for wh_id, wh in list(_WEBHOOKS.items()):
+        if not wh["active"]:
+            continue
+        if event not in wh["events"]:
+            continue
+        try:
+            data = json.dumps({"event": event, "data": payload, "timestamp": datetime.now().isoformat()}).encode()
+            req = urllib.request.Request(
+                wh["url"],
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "HumanizeAI-Webhook/1.0"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            print(f"[webhook] Failed to send to {wh['url']}: {e}", flush=True)
+
+def list_webhooks():
+    return list(_WEBHOOKS.values())
+
+def delete_webhook(webhook_id):
+    if webhook_id in _WEBHOOKS:
+        del _WEBHOOKS[webhook_id]
+        return True
+    return False
+
+
 # ─── HTML Template ────────────────────────────────────────────────────
 
 HTML = r"""<!DOCTYPE html>
@@ -2278,6 +2621,7 @@ HTML = r"""<!DOCTYPE html>
       </div>
     </div>
 
+    <div id="liveWordCount" style="font-size:11px;color:#666;margin-bottom:4px;">Input: 0 words | Output: 0 words</div>
     <div class="status" id="status">Ready | Score: <span id="liveScore" style="color:#666;">--</span></div>
     <div class="stats" id="stats"></div>
 
@@ -2871,6 +3215,22 @@ async function batchUpload(files) {
   }
   status.textContent = 'Loaded ' + files.length + ' files (' + document.getElementById('input').value.split(/\s+/).length + ' total words)';
 }
+
+
+// Live word count
+function updateWordCount() {
+  var inp = document.getElementById('input').value;
+  var out = document.getElementById('output').value;
+  var iw = inp.trim() ? inp.trim().split(/\s+/).length : 0;
+  var ow = out.trim() ? out.trim().split(/\s+/).length : 0;
+  var pct = iw > 0 ? Math.round(ow/iw*100) : 0;
+  var color = Math.abs(ow-iw) < 20 ? '#00cc88' : '#ffaa00';
+  var el = document.getElementById('liveWordCount');
+  if(el) el.innerHTML = 'Input: <b>'+iw+'</b> | Output: <b>'+ow+'</b> | <span style="color:'+color+'">'+pct+'% kept</span>';
+}
+document.getElementById('input').addEventListener('input', updateWordCount);
+document.getElementById('output').addEventListener('input', updateWordCount);
+
 </script>
 </body>
 </html>"""
@@ -2920,9 +3280,36 @@ class Handler(BaseHTTPRequestHandler):
             with JOBS_LOCK:
                 job = JOBS.get(job_id)
             if job:
+                # Add time estimation to progress response
+                if job["status"] == "processing":
+                    elapsed = time.time() - job.get("start_time", time.time())
+                    model = job.get("model", LLM_MODEL)
+                    time_est = estimate_time_remaining(
+                        job.get("input_words", 0),
+                        job.get("chunks_total", 1),
+                        job.get("chunks_done", 0),
+                        elapsed,
+                        model=model,
+                    )
+                    job["time_estimate"] = time_est
+                    job["time_remaining_text"] = format_time_remaining(time_est["remaining_seconds"])
                 self._json_response(job)
             else:
                 self._json_response({"error": "Job not found"}, 404)
+        elif self.path == "/api/keys/list":
+            self._json_response(list_api_keys())
+        elif self.path == "/api/webhooks/list":
+            self._json_response(list_webhooks())
+        elif self.path == "/api/style/profiles":
+            profiles = [{"id": p["id"], "stats": p["stats"], "created": p["created"]} for p in _STYLE_PROFILES.values()]
+            self._json_response(profiles)
+        elif self.path == "/api/cache/stats":
+            self._json_response({
+                "full_text_cache_size": len(_FULL_TEXT_CACHE),
+                "llm_cache_size": len(_LLM_CACHE),
+                "llm_cache_hits": _LLM_CACHE_HITS,
+                "llm_cache_misses": _LLM_CACHE_MISSES,
+            })
         else:
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
@@ -2950,6 +3337,36 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_custom_lists()
         elif self.path == "/api/external-check":
             self._handle_external_check()
+        elif self.path == "/api/readability":
+            self._handle_readability()
+        elif self.path == "/api/grammar":
+            self._handle_grammar()
+        elif self.path == "/api/variants":
+            self._handle_variants()
+        elif self.path == "/api/tone-slider":
+            self._handle_tone_slider()
+        elif self.path == "/api/style-train":
+            self._handle_style_train()
+        elif self.path == "/api/docs":
+            self._handle_api_docs()
+        elif self.path == "/api/webhook/register":
+            self._handle_webhook_register()
+        elif self.path == "/api/webhook/delete":
+            self._handle_webhook_delete()
+        elif self.path == "/api/style/train":
+            self._handle_style_train()
+        elif self.path == "/api/style/analyze":
+            self._handle_style_analyze()
+        elif self.path == "/api/keys/generate":
+            self._handle_key_generate()
+        elif self.path == "/api/keys/revoke":
+            self._handle_key_revoke()
+        elif self.path == "/api/webhooks/register":
+            self._handle_webhook_register()
+        elif self.path == "/api/webhooks/delete":
+            self._handle_webhook_delete()
+        elif self.path == "/v1/humanize":
+            self._handle_dev_api()
         else:
             self.send_response(404)
             self.end_headers()
@@ -2967,6 +3384,8 @@ class Handler(BaseHTTPRequestHandler):
             ref_sample = body.get("ref_sample", "")
             preserve = body.get("preserve", "")
             avoid = body.get("avoid", "")
+            auto_retry = body.get("autoRetry", False)
+            strict_wc = body.get("strictWordCount", False)
             if preserve or avoid:
                 load_custom_lists(preserve, avoid)
                 import sys
@@ -2978,6 +3397,20 @@ class Handler(BaseHTTPRequestHandler):
 
             if not text:
                 self._json_response({"error": "No text provided"}, 400)
+                return
+
+            # Check full-text cache first
+            text_hash = make_text_hash(text, passes, model, tone)
+            cached = fulltext_cache_get(text_hash)
+            if cached:
+                self._json_response({
+                    "cached": True,
+                    "result": cached["text"],
+                    "output_words": cached["words"],
+                    "score": cached["score"],
+                    "time": 0,
+                    "job_id": "cached",
+                })
                 return
 
             job_id = str(uuid.uuid4())[:8]
@@ -2999,12 +3432,14 @@ class Handler(BaseHTTPRequestHandler):
                     "output_words": 0,
                     "input_score": calc_detection_score(text),
                     "output_score": None,
+                    "start_time": time.time(),
+                    "model": model or LLM_MODEL,
                 }
 
             # Start background thread
             thread = threading.Thread(
                 target=self._run_humanize_job,
-                args=(job_id, text, passes, model, tone, domain, ref_sample),
+                args=(job_id, text, passes, model, tone, domain, ref_sample, auto_retry, strict_wc),
                 daemon=True,
             )
             thread.start()
@@ -3016,7 +3451,7 @@ class Handler(BaseHTTPRequestHandler):
             print(f"[ERROR] {traceback.format_exc()}", flush=True)
             self._json_response({"error": str(e)}, 500)
 
-    def _run_humanize_job(self, job_id, text, passes, model, tone, domain="general", ref_sample=""):
+    def _run_humanize_job(self, job_id, text, passes, model, tone, domain="general", ref_sample="", auto_retry=False, strict_wc=False):
         """Run full humanization in background, updating JOBS dict progressively."""
         t0 = time.time()
         input_words = len(text.split())
@@ -3036,7 +3471,7 @@ class Handler(BaseHTTPRequestHandler):
                 output_score = calc_detection_score(result)
 
                 # Strict word count enforcement (±5%)
-                strict_wc = text_params.get('strictWordCount', False)
+                # strict_wc is a parameter
                 if strict_wc and input_words > 0:
                     out_words = len(result.split())
                     ratio = out_words / input_words
@@ -3235,6 +3670,20 @@ class Handler(BaseHTTPRequestHandler):
                     "output_words": len(result.split()),
                     "output_score": output_score,
                 })
+
+            # Cache result for future identical requests
+            text_hash = make_text_hash(text, passes, model, tone)
+            fulltext_cache_set(text_hash, {"text": result, "score": output_score, "words": len(result.split()), "time": elapsed})
+
+            # Send webhook notification
+            send_webhook("job_complete", {
+                "job_id": job_id,
+                "input_words": input_words,
+                "output_words": len(result.split()),
+                "score": output_score["score"],
+                "grade": output_score["grade"],
+                "time": elapsed,
+            })
 
         except Exception as e:
             import traceback
@@ -3560,6 +4009,252 @@ class Handler(BaseHTTPRequestHandler):
                 })
         except Exception as e:
             self._json_response({"error": str(e)[:200]}, 500)
+
+    def _handle_readability(self):
+        """Calculate Flesch-Kincaid readability metrics."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            fk = calc_flesch_kincaid(text)
+            self._json_response(fk)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_grammar(self):
+        """Check grammar using LanguageTool API."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")[:5000]
+            result = check_grammar_languagetool(text)
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_variants(self):
+        """Generate 3 output variants, pick best."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            passes = body.get("passes", 3)
+            model = body.get("model", None)
+            tone = body.get("tone", "casual")
+            num = body.get("num_variants", 3)
+            if not text:
+                self._json_response({"error": "No text"}, 400)
+                return
+            job_id = str(uuid.uuid4())[:8]
+            input_words = len(text.split())
+            with JOBS_LOCK:
+                JOBS[job_id] = {
+                    "status": "processing",
+                    "progress": 0,
+                    "chunks_done": 0,
+                    "chunks_total": num,
+                    "partial": "",
+                    "result": None,
+                    "error": None,
+                    "time": None,
+                    "input_words": input_words,
+                    "output_words": 0,
+                    "input_score": calc_detection_score(text),
+                    "output_score": None,
+                    "start_time": time.time(),
+                    "model": model or LLM_MODEL,
+                    "type": "variants",
+                }
+            def run_variants():
+                t0 = time.time()
+                try:
+                    result = humanize_variants(text, passes, model, tone, num)
+                    best = result["best"]
+                    elapsed = round(time.time() - t0, 1)
+                    output_score = calc_detection_score(best["text"])
+                    with JOBS_LOCK:
+                        JOBS[job_id].update({
+                            "status": "done",
+                            "progress": 100,
+                            "chunks_done": num,
+                            "result": result,
+                            "partial": best["text"],
+                            "time": elapsed,
+                            "output_words": best["words"],
+                            "output_score": output_score,
+                        })
+                    send_webhook("job_complete", {"job_id": job_id, "score": best["score"], "words": best["words"]})
+                except Exception as e:
+                    with JOBS_LOCK:
+                        JOBS[job_id].update({"status": "error", "error": str(e)})
+            thread = threading.Thread(target=run_variants, daemon=True)
+            thread.start()
+            self._json_response({"job_id": job_id, "type": "variants", "num_variants": num})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_tone_slider(self):
+        """Get tone settings from 1-10 slider value."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            level = body.get("level", 5)
+            result = get_tone_from_slider(level)
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_api_docs(self):
+        """Developer API documentation endpoint."""
+        docs = {
+            "name": "HumanizeAI API v5",
+            "version": "5.0",
+            "base_url": "http://localhost:7860",
+            "authentication": "API key required (X-API-Key header)",
+            "endpoints": [
+                {"method": "POST", "path": "/api/humanize", "params": {"text": "string", "model": "string", "tone": "string", "passes": "int"}, "returns": {"job_id": "string"}},
+                {"method": "GET", "path": "/api/progress/{job_id}", "returns": {"status": "string", "progress": "int", "result": "string"}},
+                {"method": "POST", "path": "/api/analyze", "params": {"text": "string"}, "returns": {"score": "int", "grade": "string"}},
+                {"method": "POST", "path": "/api/preview", "params": {"text": "string"}, "returns": {"preview_output": "string"}},
+                {"method": "POST", "path": "/api/variants", "params": {"text": "string", "num": "int"}, "returns": {"variants": [{"text": "string", "score": "int"}]}},
+                {"method": "POST", "path": "/api/tone-slider", "params": {"text": "string", "level": "float 0-1"}, "returns": {"text": "string"}},
+                {"method": "POST", "path": "/api/readability", "params": {"text": "string"}, "returns": {"grade": "float", "reading_ease": "float"}},
+                {"method": "POST", "path": "/api/grammar", "params": {"text": "string"}, "returns": {"issues": [], "total": "int"}},
+            ],
+            "rate_limits": "100 requests/hour per API key",
+        }
+        self._json_response(docs)
+
+    def _handle_style_train(self):
+        """Train writing style from uploaded samples."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            samples = body.get("samples", [])
+            if not samples or len(samples) < 1:
+                self._json_response({"error": "Need at least 1 writing sample"}, 400)
+                return
+            profile = train_style(samples)
+            if not profile:
+                self._json_response({"error": "Could not analyze samples"}, 400)
+                return
+            self._json_response(profile)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_style_analyze(self):
+        """Analyze writing style of given text."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            if not text:
+                self._json_response({"error": "No text"}, 400)
+                return
+            stats = analyze_writing_style(text)
+            self._json_response(stats or {"error": "Could not analyze"})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_key_generate(self):
+        """Generate a new API key."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            name = body.get("name", "default")
+            rate_limit = body.get("rate_limit", 100)
+            result = generate_api_key(name, rate_limit)
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_key_revoke(self):
+        """Revoke an API key."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            key_hash = body.get("hash", "")
+            if revoke_api_key(key_hash):
+                self._json_response({"success": True})
+            else:
+                self._json_response({"error": "Key not found"}, 404)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_webhook_register(self):
+        """Register a webhook URL."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            url = body.get("url", "")
+            events = body.get("events", None)
+            if not url:
+                self._json_response({"error": "No URL provided"}, 400)
+                return
+            result = register_webhook(url, events)
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_webhook_delete(self):
+        """Delete a webhook."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            webhook_id = body.get("id", "")
+            if delete_webhook(webhook_id):
+                self._json_response({"success": True})
+            else:
+                self._json_response({"error": "Webhook not found"}, 404)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_dev_api(self):
+        """Developer API endpoint with API key authentication."""
+        try:
+            # Check API key from Authorization header
+            auth = self.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                raw_key = auth[7:]
+            else:
+                raw_key = auth
+            valid, msg = validate_api_key(raw_key)
+            if not valid:
+                self._json_response({"error": msg}, 401)
+                return
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            passes = body.get("passes", 3)
+            model = body.get("model", None)
+            tone = body.get("tone", "casual")
+            if not text:
+                self._json_response({"error": "No text provided"}, 400)
+                return
+            # Check cache first
+            text_hash = make_text_hash(text, passes, model, tone)
+            cached = fulltext_cache_get(text_hash)
+            if cached:
+                self._json_response({"result": cached["text"], "score": cached["score"], "cached": True, "words": cached["words"]})
+                return
+            # Process synchronously for API
+            t0 = time.time()
+            result = humanize(text, passes=passes, model=model, tone=tone)
+            score = calc_detection_score(result)
+            elapsed = round(time.time() - t0, 1)
+            result_data = {"text": result, "score": score, "words": len(result.split()), "time": elapsed}
+            fulltext_cache_set(text_hash, result_data)
+            self._json_response({
+                "result": result,
+                "score": score["score"],
+                "grade": score["grade"],
+                "input_words": len(text.split()),
+                "output_words": len(result.split()),
+                "time": elapsed,
+                "cached": False,
+            })
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
 
     def _json_response(self, data, status=200):
         self.send_response(status)

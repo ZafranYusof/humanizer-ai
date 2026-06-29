@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 300px; background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, sans-serif; padding: 16px; }
+h1 { font-size: 16px; color: #00cc88; margin-bottom: 8px; }
+p { font-size: 12px; color: #888; margin-bottom: 12px; }
+textarea { width: 100%; height: 120px; background: #111; border: 1px solid #333; color: #e0e0e0; padding: 8px; font-size: 12px; border-radius: 4px; resize: vertical; margin-bottom: 8px; }
+button { width: 100%; padding: 10px; background: #00cc88; color: #000; border: none; border-radius: 4px; font-size: 13px; font-weight: 600; cursor: pointer; }
+button:hover { background: #00e099; }
+button:disabled { background: #333; color: #666; cursor: not-allowed; }
+#status { font-size: 11px; color: #666; margin-top: 8px; }
+.result { background: #0d1117; border: 1px solid #333; padding: 8px; border-radius: 4px; margin-top: 8px; font-size: 12px; max-height: 150px; overflow-y: auto; display: none; }
+</style>
+</head>
+<body>
+<h1>HumanizeAI</h1>
+<p>Paste text or right-click selected text on any page</p>
+<textarea id="input" placeholder="Paste AI text here..."></textarea>
+<button id="btn" onclick="humanize()">Humanize</button>
+<div id="status"></div>
+<div class="result" id="result"></div>
+<script>
+const API = 'http://localhost:7860';
+
+async function humanize() {
+  const text = document.getElementById('input').value.trim();
+  if (!text) { alert('Paste text first'); return; }
+  
+  const btn = document.getElementById('btn');
+  const status = document.getElementById('status');
+  btn.disabled = true;
+  status.textContent = 'Processing...';
+  
+  try {
+    const resp = await fetch(API + '/api/humanize', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, passes: 3, tone: 'casual', model: 'QW/qwen3.6-flash'})
+    });
+    const data = await resp.json();
+    const jobId = data.job_id;
+    
+    // Poll
+    for (let i = 0; i < 60; i++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const prog = await (await fetch(API + '/api/progress/' + jobId)).json();
+      status.textContent = 'Processing... ' + (prog.progress || 0) + '%';
+      if (prog.status === 'done') {
+        const result = prog.result || prog.partial;
+        document.getElementById('result').style.display = 'block';
+        document.getElementById('result').textContent = result;
+        status.textContent = 'Done! ' + result.split(/\s+/).length + ' words';
+        navigator.clipboard.writeText(result);
+        break;
+      }
+    }
+  } catch(e) {
+    status.textContent = 'Error: ' + e.message;
+  }
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>
