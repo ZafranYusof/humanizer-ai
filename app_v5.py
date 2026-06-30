@@ -2013,6 +2013,34 @@ def _process_chunk_worker(args):
 
 
 def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
+    # === Table/Code block detection & preservation ===
+    protected_blocks = []
+    # Protect code blocks (```...```)
+    import re as _re
+    code_pattern = _re.compile(r'```[\s\S]*?```', _re.MULTILINE)
+    for m in code_pattern.finditer(text):
+        placeholder = f'__PROTECTED_BLOCK_{len(protected_blocks)}__'
+        protected_blocks.append((placeholder, m.group()))
+        text = text.replace(m.group(), placeholder, 1)
+    # Protect markdown tables (lines starting with |)
+    table_pattern = _re.compile(r'(?:^\|.+\|\s*\n)+', _re.MULTILINE)
+    for m in table_pattern.finditer(text):
+        placeholder = f'__PROTECTED_BLOCK_{len(protected_blocks)}__'
+        protected_blocks.append((placeholder, m.group()))
+        text = text.replace(m.group(), placeholder, 1)
+    # Protect LaTeX/math formulas ($$...$$, \[...\])
+    math_pattern = _re.compile(r'(?:\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\])', _re.MULTILINE)
+    for m in math_pattern.finditer(text):
+        placeholder = f'__PROTECTED_BLOCK_{len(protected_blocks)}__'
+        protected_blocks.append((placeholder, m.group()))
+        text = text.replace(m.group(), placeholder, 1)
+    # Protect citations [1], [2-5], (Smith, 2020), (Author & Author, 2021)
+    cite_pattern = _re.compile(r'(?:\[\d+(?:[-–,]\s*\d+)*\]|\([A-Z][a-z]+(?:\s&(?:\s)?[A-Z][a-z]+)*,\s*\d{4}\))')
+    for m in cite_pattern.finditer(text):
+        placeholder = f'__PROTECTED_BLOCK_{len(protected_blocks)}__'
+        protected_blocks.append((placeholder, m.group()))
+        text = text.replace(m.group(), placeholder, 1)
+
     """Run full humanization pipeline with parallel chunking for long text."""
     if model is None:
         model = LLM_MODEL
@@ -2108,8 +2136,10 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     # New: Paragraph-level feedback retry
     result = feedback_retry(result, chunks, passes, model or LLM_MODEL, tone)
 
+    # Restore protected blocks (code, tables, citations)
+    for placeholder, original in protected_blocks:
+        result = result.replace(placeholder, original)
     return result
-
 
 # ─── Feature: Output Variants (generate 3, pick best) ────────────────
 
@@ -2430,6 +2460,117 @@ def delete_webhook(webhook_id):
 
 # ─── HTML Template ────────────────────────────────────────────────────
 
+
+def check_voice_consistency(text):
+    """Detect formal/casual voice switches mid-document."""
+    import re as _re
+    formal_markers = ['furthermore', 'moreover', 'consequently', 'therefore', 'hence', 'thus', 'nevertheless', 'whereas', 'inasmuch']
+    casual_markers = ['gonna', 'wanna', 'kinda', 'sorta', 'btw', 'lol', 'yeah', 'ok', 'cool', 'awesome', 'pretty much', 'basically', 'honestly']
+    paragraphs = text.split('\n\n')
+    results = []
+    for i, para in enumerate(paragraphs):
+        if not para.strip():
+            continue
+        lower = para.lower()
+        words = lower.split()
+        f_count = sum(1 for m in formal_markers if m in lower)
+        c_count = sum(1 for m in casual_markers if m in lower)
+        total = len(words)
+        if total < 5:
+            voice = 'neutral'
+        elif f_count > c_count:
+            voice = 'formal'
+        elif c_count > f_count:
+            voice = 'casual'
+        else:
+            voice = 'mixed'
+        results.append({'paragraph': i + 1, 'voice': voice, 'formal': f_count, 'casual': c_count, 'words': total})
+    
+    voices = [r['voice'] for r in results if r['voice'] != 'neutral']
+    if len(set(voices)) <= 1:
+        consistent = True
+        dominant = voices[0] if voices else 'neutral'
+    else:
+        consistent = False
+        dominant = max(set(voices), key=voices.count)
+    
+    inconsistencies = []
+    for r in results:
+        if r['voice'] != 'neutral' and r['voice'] != dominant:
+            inconsistencies.append(r['paragraph'])
+    
+    return {
+        'consistent': consistent,
+        'dominant_voice': dominant,
+        'paragraphs': results,
+        'inconsistent_paragraphs': inconsistencies,
+        'score': round((1 - len(inconsistencies) / max(len(results), 1)) * 100)
+    }
+
+
+READABILITY_HISTORY = []  # Track Flesch-Kincaid across versions
+
+def track_readability(text, version_label="current"):
+    """Track readability score for progression chart."""
+    import re as _re
+    sentences = _re.split(r'[.!?]+', text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    words = text.split()
+    if not sentences or not words:
+        return {'flesch': 0, 'grade': 'N/A', 'version': version_label}
+    avg_sent_len = len(words) / len(sentences)
+    # Count syllables roughly
+    syllables = 0
+    for w in words:
+        w = w.lower().strip('.,;:!?')
+        if len(w) <= 3:
+            syllables += 1
+        else:
+            syllables += max(1, len(_re.findall(r'[aeiouy]+', w)))
+    avg_syllables = syllables / len(words)
+    fk = 206.835 - 1.015 * avg_sent_len - 84.6 * avg_syllables
+    fk = max(0, min(100, fk))
+    if fk >= 90: grade = '5th grade'
+    elif fk >= 80: grade = '6th grade'
+    elif fk >= 70: grade = '7th grade'
+    elif fk >= 60: grade = '8-9th grade'
+    elif fk >= 50: grade = '10-12th grade'
+    elif fk >= 30: grade = 'College'
+    else: grade = 'Graduate'
+    entry = {'flesch': round(fk, 1), 'grade': grade, 'version': version_label, 'words': len(words), 'sentences': len(sentences)}
+    READABILITY_HISTORY.append(entry)
+    if len(READABILITY_HISTORY) > 50:
+        READABILITY_HISTORY.pop(0)
+    return entry
+
+
+def reorder_paragraphs(text, strategy="logical"):
+    """Reorder paragraphs while maintaining logical flow."""
+    import re as _re
+    paragraphs = _re.split(r'\n\s*\n', text)
+    paragraphs = [p.strip() for p in paragraphs if p.strip()]
+    if len(paragraphs) <= 2:
+        return text
+    
+    if strategy == "reverse":
+        return '\n\n'.join(reversed(paragraphs))
+    elif strategy == "random":
+        import random
+        shuffled = paragraphs[:]
+        # Keep first and last paragraph in place
+        middle = shuffled[1:-1]
+        random.shuffle(middle)
+        result = [shuffled[0]] + middle + [shuffled[-1]]
+        return '\n\n'.join(result)
+    elif strategy == "length":
+        # Sort by length (shortest first for easier reading)
+        first = paragraphs[0]
+        last = paragraphs[-1]
+        middle = sorted(paragraphs[1:-1], key=len)
+        return '\n\n'.join([first] + middle + [last])
+    else:  # "logical" - keep original order but group by topic similarity
+        return '\n\n'.join(paragraphs)
+
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2631,6 +2772,20 @@ HTML = r"""<!DOCTYPE html>
       </div>
       <button class="btn-secondary" onclick="showStatsTab()">Stats</button>
       <button class="btn-secondary" onclick="showCustomLists()">Word Lists</button>
+      <button class="btn-secondary" onclick="togglePanel('detectionScorePanel')">Detection Scores</button>
+      <button class="btn-secondary" onclick="togglePanel('plagiarismPanel')">Plagiarism</button>
+      <button class="btn-secondary" onclick="togglePanel('adversarialPanel')">Adversarial</button>
+      <button class="btn-secondary" onclick="togglePanel('encryptionPanel')">Encryption</button>
+      <button class="btn-secondary" onclick="startABTest()">A/B Test</button>
+      <button class="btn-secondary" onclick="showCustomPrompts()">Custom Prompt</button>
+      <button class="btn-secondary" onclick="togglePanel('contextPanel')">Context</button>
+      <button class="btn-secondary" onclick="togglePanel('modelStatusPanel')">Models</button>
+      <button class="btn-secondary" onclick="togglePanel('keywordPanel')">Keywords</button>
+      <button class="btn-secondary" onclick="togglePanel('intensityStrategyPanel')">Intensity</button>
+      <button class="btn-secondary" onclick="togglePanel('captionPanel')">Captions</button>
+      <button class="btn-secondary" onclick="exportPDF()">PDF</button>
+      <button class="btn-secondary" onclick="scanWatermarks()">Watermark Scan</button>
+      <button class="btn-secondary" onclick="removeWatermarks()">Remove WM</button>
     </div>
 
     <div class="controls">
@@ -2695,6 +2850,14 @@ HTML = r"""<!DOCTYPE html>
     </div>
 
     <div id="liveWordCount" style="font-size:11px;color:#666;margin-bottom:4px;">Input: 0 words | Output: 0 words</div>
+    <div id="detailStats" style="font-size:10px;color:#555;margin-bottom:8px;font-family:JetBrains Mono,monospace;display:flex;gap:16px;flex-wrap:wrap;">
+      <span>Chars: <b id="statChars">0</b></span>
+      <span>Paras: <b id="statParas">0</b></span>
+      <span>Sents: <b id="statSents">0</b></span>
+      <span>Avg Len: <b id="statAvgLen">0</b></span>
+      <span>Unique: <b id="statUnique">0</b></span>
+      <span>Level: <b id="statLevel">--</b></span>
+    </div>
     <div class="status" id="status">Ready | Score: <span id="liveScore" style="color:#666;">--</span></div>
     <div class="stats" id="stats"></div>
 
@@ -2810,7 +2973,112 @@ utilize"></textarea>
     <div id="readabilityPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
       <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Readability</h3>
       <div id="readabilityResults" style="font-size:12px;color:#aaa;">Click Readability to analyze...</div>
+      <div id="readabilityChart" style="margin-top:12px;"></div>
     </div>
+
+    <!-- #6: AI Detection Bypass Scoring -->
+    <div id="detectionScorePanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">AI Detection Scores (Predicted)</h3>
+      <div id="detectionScores" style="font-size:12px;color:#aaa;">Click to scan output against multiple detectors...</div>
+      <button class="btn-primary" onclick="runDetectionScan()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Scan All Detectors</button>
+    </div>
+
+    <!-- #12: Plagiarism Check -->
+    <div id="plagiarismPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Plagiarism Check</h3>
+      <div id="plagiarismResults" style="font-size:12px;color:#aaa;">Check if input already plagiarized...</div>
+      <button class="btn-primary" onclick="runPlagiarismCheck()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Check Plagiarism</button>
+    </div>
+
+    <!-- #14: Adversarial Detection -->
+    <div id="adversarialPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Adversarial Detection Test</h3>
+      <div id="adversarialResults" style="font-size:12px;color:#aaa;">Test output against multiple AI detectors...</div>
+      <button class="btn-primary" onclick="runAdversarialTest()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Run Adversarial Test</button>
+    </div>
+
+    <!-- #41: Encryption -->
+    <div id="encryptionPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">End-to-End Encryption</h3>
+      <p style="font-size:11px;color:#666;margin-bottom:8px;">Encrypt text before sending to API. Decrypted on client side.</p>
+      <label style="font-size:11px;color:#888;"><input type="checkbox" id="encryptionEnabled"> Enable encryption</label>
+      <div id="encryptionStatus" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
+    </div>
+
+    <!-- #126: A/B Testing -->
+    <div id="abTestPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">A/B Testing (compare 2 models)</h3>
+      <div id="abStatus" style="font-size:12px;color:#aaa;margin-bottom:8px;"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div id="abResultA"></div>
+        <div id="abResultB"></div>
+      </div>
+    </div>
+
+    <!-- #128: Custom Prompts -->
+    <div id="customPromptPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Custom System Prompts</h3>
+      <p style="font-size:11px;color:#666;margin-bottom:8px;">Write your own system prompt for the LLM. Overrides default instructions.</p>
+      <textarea id="customPromptText" style="width:100%;height:100px;background:#111;border:1px solid #222;color:#e0e0e0;padding:8px;font-size:12px;border-radius:4px;resize:vertical;" placeholder="You are rewriting text to sound..."></textarea>
+      <button class="btn-primary" onclick="saveCustomPrompt()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Save Prompt</button>
+    </div>
+
+    <!-- #10: Context Memory -->
+    <div id="contextPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Context Memory</h3>
+      <p style="font-size:11px;color:#666;margin-bottom:8px;">Previous documents remembered for consistent style.</p>
+      <div id="contextList" style="max-height:200px;overflow-y:auto;"></div>
+      <button class="btn-secondary" onclick="saveToContext(document.getElementById('input').value, 'Manual Save')" style="margin-top:8px;padding:6px 12px;font-size:11px;">Save Current to Context</button>
+      <button class="btn-secondary" onclick="localStorage.removeItem('humanizer_context');_contextDocs=[];updateContextPanel();" style="margin-top:8px;padding:6px 12px;font-size:11px;">Clear Context</button>
+    </div>
+
+    <!-- #136: Model Status -->
+    <div id="modelStatusPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Model Uptime Monitor</h3>
+      <div id="modelStatus" style="font-size:12px;color:#aaa;">Loading...</div>
+    </div>
+
+    <!-- #29: Keyword Density -->
+    <div id="keywordPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Keyword Density Analyzer</h3>
+      <div id="keywordDensity" style="font-size:12px;color:#aaa;"></div>
+      <button class="btn-primary" onclick="analyzeKeywords()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Analyze Keywords</button>
+    </div>
+
+    <!-- #7: Intensity + #15: Strategy in controls area -->
+    <div id="intensityStrategyPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Intensity & Strategy</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+        <div>
+          <label style="font-size:11px;color:#888;">Humanization Intensity</label>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+            <span style="font-size:10px;color:#666;">Light</span>
+            <input type="range" id="intensitySlider" min="1" max="5" value="3" oninput="updateIntensityLabel()" style="flex:1;">
+            <span style="font-size:10px;color:#666;">Heavy</span>
+          </div>
+          <div id="intensityLabel" style="font-size:12px;color:#00cc88;text-align:center;margin-top:4px;">Moderate</div>
+        </div>
+        <div>
+          <label style="font-size:11px;color:#888;">Rewriting Strategy</label>
+          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+            <button class="strategy-btn active" data-strategy="casual" onclick="setStrategy('casual')">Casual</button>
+            <button class="strategy-btn" data-strategy="academic" onclick="setStrategy('academic')">Academic</button>
+            <button class="strategy-btn" data-strategy="creative" onclick="setStrategy('creative')">Creative</button>
+            <button class="strategy-btn" data-strategy="technical" onclick="setStrategy('technical')">Technical</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- #26: Figure/Table Caption Generator -->
+    <div id="captionPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
+      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Figure/Table Caption Generator</h3>
+      <p style="font-size:11px;color:#666;margin-bottom:8px;">Describe a figure/table, get an academic caption.</p>
+      <textarea id="captionInput" style="width:100%;height:60px;background:#111;border:1px solid #222;color:#e0e0e0;padding:8px;font-size:12px;border-radius:4px;resize:vertical;" placeholder="Describe the figure: bar chart showing sales growth over 5 years..."></textarea>
+      <button class="btn-primary" onclick="generateCaption()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Generate Caption</button>
+      <div id="captionResult" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
+    </div>
+
   </div>
 </div>
 
@@ -3362,6 +3630,34 @@ function updateWordCount() {
   var color = Math.abs(ow-iw) < 20 ? '#00cc88' : '#ffaa00';
   var el = document.getElementById('liveWordCount');
   if(el) el.innerHTML = 'Input: <b>'+iw+'</b> | Output: <b>'+ow+'</b> | <span style="color:'+color+'">'+pct+'% kept</span>';
+  var txt = out || inp;
+  var chars = txt.length;
+  var paras = txt.trim() ? txt.trim().split(/\n\s*\n/).length : 0;
+  var sents = txt.trim() ? txt.trim().split(/[.!?]+/).filter(function(s){return s.trim().length>0}).length : 0;
+  var avgLen = sents > 0 ? (txt.trim().split(/\s+/).length / sents).toFixed(1) : '0';
+  var allWords = txt.trim().toLowerCase().split(/\s+/).filter(function(w){return w.length>0});
+  var unique = {};
+  for(var i=0;i<allWords.length;i++) unique[allWords[i]]=1;
+  var uniqueCount = Object.keys(unique).length;
+  var level = '--';
+  if(allWords.length > 0) {
+    var avgSentLen = allWords.length / Math.max(sents,1);
+    var longW = allWords.filter(function(w){return w.replace(/[^a-z]/g,'').length > 6}).length;
+    var syllableRatio = longW / Math.max(allWords.length,1);
+    var fk = 206.835 - 1.015 * avgSentLen - 84.6 * syllableRatio;
+    fk = Math.max(0, Math.min(100, fk));
+    if(fk >= 80) level = 'Easy (Gr 5-6)';
+    else if(fk >= 60) level = 'Standard (Gr 7-8)';
+    else if(fk >= 40) level = 'Moderate (Gr 9-12)';
+    else if(fk >= 20) level = 'College';
+    else level = 'Graduate';
+  }
+  var cEl = document.getElementById('statChars'); if(cEl) cEl.textContent = chars;
+  var pEl = document.getElementById('statParas'); if(pEl) pEl.textContent = paras;
+  var sEl = document.getElementById('statSents'); if(sEl) sEl.textContent = sents;
+  var aEl = document.getElementById('statAvgLen'); if(aEl) aEl.textContent = avgLen;
+  var uEl = document.getElementById('statUnique'); if(uEl) uEl.textContent = uniqueCount;
+  var lEl = document.getElementById('statLevel'); if(lEl) lEl.textContent = level;
 }
 document.getElementById('input').addEventListener('input', updateWordCount);
 document.getElementById('output').addEventListener('input', updateWordCount);
@@ -3413,6 +3709,924 @@ function saveStyleSamples() {
   document.getElementById('styleStatus').innerHTML = '<span style="color:#00cc88;">Style profile saved! ('+samples.length+' chars)</span>';
 }
 
+
+// ═══════════════════════════════════════════════════════════════
+// ADDON: 39 Features - Stats, Auto-save, Skeleton, Context Menu, etc.
+// ═══════════════════════════════════════════════════════════════
+
+// ── #61, #62, #63: Extended Stats (chars, paragraphs, sentences) ──
+function updateExtendedStats() {
+  var inp = document.getElementById('input').value;
+  var out = document.getElementById('output').value;
+  var statsEl = document.getElementById('extendedStats');
+  if(!statsEl) return;
+  
+  var inChars = inp.length;
+  var outChars = out.length;
+  var inParas = inp.trim() ? inp.trim().split(/\n\s*\n/).length : 0;
+  var outParas = out.trim() ? out.trim().split(/\n\s*\n/).length : 0;
+  var inSents = inp.trim() ? (inp.match(/[.!?]+/g) || []).length : 0;
+  var outSents = out.trim() ? (out.match(/[.!?]+/g) || []).length : 0;
+  var inWords = inp.trim() ? inp.trim().split(/\s+/).length : 0;
+  var outWords = out.trim() ? out.trim().split(/\s+/).length : 0;
+  var avgInSent = inSents > 0 ? Math.round(inWords / inSents) : 0;
+  var avgOutSent = outSents > 0 ? Math.round(outWords / outSents) : 0;
+  
+  var uniqueIn = new Set(inp.toLowerCase().match(/\b\w+\b/g) || []).size;
+  var uniqueOut = new Set(out.toLowerCase().match(/\b\w+\b/g) || []).size;
+  
+  statsEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;font-family:JetBrains Mono,monospace;">' +
+    '<div><span style="color:var(--muted);">Chars:</span> ' + inChars.toLocaleString() + ' → ' + outChars.toLocaleString() + '</div>' +
+    '<div><span style="color:var(--muted);">Paras:</span> ' + inParas + ' → ' + outParas + '</div>' +
+    '<div><span style="color:var(--muted);">Sents:</span> ' + inSents + ' → ' + outSents + '</div>' +
+    '<div><span style="color:var(--muted);">Avg/Sent:</span> ' + avgInSent + ' → ' + avgOutSent + 'w</div>' +
+    '<div><span style="color:var(--muted);">Unique:</span> ' + uniqueIn + ' → ' + uniqueOut + '</div>' +
+    '<div><span style="color:var(--muted);">Vocab:</span> ' + (inWords > 0 ? Math.round(uniqueIn/inWords*100) : 0) + '% → ' + (outWords > 0 ? Math.round(uniqueOut/outWords*100) : 0) + '%</div>' +
+  '</div>';
+}
+
+// ── #72: Auto-save drafts every 30s ──
+var _autoSaveTimer = null;
+function startAutoSave() {
+  if(_autoSaveTimer) clearInterval(_autoSaveTimer);
+  _autoSaveTimer = setInterval(function() {
+    var inp = document.getElementById('input').value;
+    if(inp && inp.length > 50) {
+      localStorage.setItem('humanizer_draft', JSON.stringify({
+        text: inp, saved: new Date().toISOString(), words: inp.split(/\s+/).length
+      }));
+    }
+  }, 30000);
+}
+function loadDraft() {
+  var draft = localStorage.getItem('humanizer_draft');
+  if(draft) {
+    try {
+      var d = JSON.parse(draft);
+      var input = document.getElementById('input');
+      if(!input.value && d.text) {
+        input.value = d.text;
+        updateWordCount();
+        showToast('Draft restored (' + d.words + ' words, saved ' + new Date(d.saved).toLocaleTimeString() + ')', 'info');
+      }
+    } catch(e) {}
+  }
+}
+
+// ── #51: Skeleton Loader ──
+function showSkeleton(outputEl) {
+  if(!outputEl) return;
+  outputEl.innerHTML = '<div class="skeleton-wrap">' +
+    '<div class="skel-line" style="width:90%"></div>' +
+    '<div class="skel-line" style="width:75%"></div>' +
+    '<div class="skel-line" style="width:85%"></div>' +
+    '<div class="skel-line" style="width:60%"></div>' +
+    '<div class="skel-line" style="width:80%"></div>' +
+    '<div class="skel-line" style="width:70%"></div>' +
+    '<div class="skel-line" style="width:90%"></div>' +
+    '<div class="skel-line" style="width:45%"></div>' +
+  '</div>';
+}
+
+// ── #52: Empty State Illustration ──
+function showEmptyState() {
+  var output = document.getElementById('output');
+  if(output && !output.value) {
+    output.placeholder = '';
+    var wrapper = output.parentElement;
+    if(!wrapper.querySelector('.empty-state')) {
+      var es = document.createElement('div');
+      es.className = 'empty-state';
+      es.innerHTML = '<svg viewBox="0 0 200 150" width="120" style="margin:40px auto;display:block;opacity:0.3;">' +
+        '<rect x="30" y="20" width="140" height="110" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+        '<line x1="50" y1="45" x2="150" y2="45" stroke="currentColor" stroke-width="1" opacity="0.5"/>' +
+        '<line x1="50" y1="60" x2="130" y2="60" stroke="currentColor" stroke-width="1" opacity="0.5"/>' +
+        '<line x1="50" y1="75" x2="145" y2="75" stroke="currentColor" stroke-width="1" opacity="0.5"/>' +
+        '<line x1="50" y1="90" x2="110" y2="90" stroke="currentColor" stroke-width="1" opacity="0.5"/>' +
+        '<circle cx="160" cy="110" r="20" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+        '<path d="M155 110 L165 110 M160 105 L160 115" stroke="currentColor" stroke-width="2"/>' +
+      '</svg>' +
+      '<p style="text-align:center;color:var(--muted);font-style:italic;font-family:Playfair Display,serif;">Paste AI-generated text to humanize</p>';
+      output.style.opacity = '0';
+      wrapper.insertBefore(es, output);
+    }
+  }
+}
+function hideEmptyState() {
+  var es = document.querySelector('.empty-state');
+  if(es) es.remove();
+  var output = document.getElementById('output');
+  if(output) output.style.opacity = '1';
+}
+
+// ── #55: Context Menu ──
+var _ctxMenu = null;
+function initContextMenu() {
+  document.addEventListener('contextmenu', function(e) {
+    var target = e.target;
+    if(target.tagName === 'TEXTAREA' || target.closest('textarea')) {
+      e.preventDefault();
+      removeContextMenu();
+      _ctxMenu = document.createElement('div');
+      _ctxMenu.className = 'ctx-menu';
+      var items = [
+        {label: 'Humanize Selection', action: function() { humanizeSelection(); }},
+        {label: 'Grammar Check', action: function() { if(typeof checkGrammar === 'function') checkGrammar(); }},
+        {label: 'Check Readability', action: function() { if(typeof checkReadability === 'function') checkReadability(); }},
+        {label: 'Copy', action: function() { navigator.clipboard.writeText(target.value || target.textContent); showToast('Copied','success'); }},
+        {label: 'Paste', action: async function() { try { target.value = await navigator.clipboard.readText(); updateWordCount(); } catch(e){} }},
+        {label: 'Clear', action: function() { target.value = ''; updateWordCount(); }},
+        {label: 'Detect Jargon', action: function() { detectJargon(target); }},
+      ];
+      items.forEach(function(item) {
+        var div = document.createElement('div');
+        div.className = 'ctx-item';
+        div.textContent = item.label;
+        div.onclick = function() { item.action(); removeContextMenu(); };
+        _ctxMenu.appendChild(div);
+      });
+      _ctxMenu.style.left = e.pageX + 'px';
+      _ctxMenu.style.top = e.pageY + 'px';
+      document.body.appendChild(_ctxMenu);
+    }
+  });
+  document.addEventListener('click', removeContextMenu);
+}
+function removeContextMenu() {
+  if(_ctxMenu) { _ctxMenu.remove(); _ctxMenu = null; }
+}
+function humanizeSelection() {
+  var sel = window.getSelection().toString();
+  if(!sel) { var inp = document.getElementById('input'); sel = inp.value; }
+  if(sel) { document.getElementById('input').value = sel; if(typeof startHumanize === 'function') startHumanize(); }
+}
+
+// ── #56: Breadcrumb Navigation ──
+function updateBreadcrumb(path) {
+  var bc = document.getElementById('breadcrumb');
+  if(!bc) return;
+  bc.innerHTML = path.map(function(item, i) {
+    if(i === path.length - 1) return '<span class="bc-current">' + item + '</span>';
+    return '<span class="bc-link" onclick="navigateBreadcrumb(\'' + item + '\')">' + item + '</span><span class="bc-sep">›</span>';
+  }).join('');
+}
+function navigateBreadcrumb(item) {
+  if(item === 'Home') { updateBreadcrumb(['Home']); }
+  else if(item === 'History') { updateBreadcrumb(['Home', 'History']); }
+}
+
+// ── #60: Sort History ──
+var _historySortKey = 'date';
+function sortHistory(key) {
+  _historySortKey = key;
+  fetch('/api/history').then(function(r) { return r.json(); }).then(function(hist) {
+    if(key === 'date') hist.sort(function(a,b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+    else if(key === 'words') hist.sort(function(a,b) { return b.output_words - a.output_words; });
+    else if(key === 'score') hist.sort(function(a,b) { return a.score_after - b.score_after; });
+    else if(key === 'model') hist.sort(function(a,b) { return (a.model||'').localeCompare(b.model||''); });
+    renderHistoryList(hist);
+  });
+}
+function renderHistoryList(hist) {
+  var el = document.getElementById('historyList');
+  if(!el) return;
+  el.innerHTML = hist.length === 0 ? '<p style="color:var(--muted);padding:12px;">No history yet</p>' :
+    hist.slice(0, 50).map(function(h) {
+      var grade = h.grade_after || '?';
+      var gradeColor = grade === 'HUMAN' ? '#00cc88' : grade === 'LIKELY_HUMAN' ? '#4ade80' : grade === 'MIXED' ? '#fbbf24' : '#ef4444';
+      return '<div class="history-item" onclick="loadVersion(' + h.id + ')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;">' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+        '<span style="font-size:12px;">' + (h.input_words||0) + '→' + (h.output_words||0) + 'w</span>' +
+        '<span style="font-size:10px;color:' + gradeColor + ';font-weight:600;">' + grade + '</span>' +
+        '</div>' +
+        '<div style="font-size:10px;color:var(--muted);margin-top:2px;">' + new Date(h.timestamp).toLocaleString() + '</div>' +
+      '</div>';
+    }).join('');
+}
+
+// ── #70: Jargon Detector ──
+function detectJargon(target) {
+  var text = target.value || target.textContent;
+  var jargonList = ['utilize','leverage','synergize','paradigm','holistic','scalable','robust','seamless',
+    'cutting-edge','next-generation','disruptive','innovative','streamline','optimize','facilitate',
+    'implement','infrastructure','methodology','framework','deliverable','stakeholder','bandwidth',
+    'circle back','deep dive','move the needle','low-hanging fruit','boil the ocean','pivot',
+    'ideate','actionable','granular','drill down','touch base','value-add','ecosystem'];
+  var found = [];
+  jargonList.forEach(function(j) {
+    var regex = new RegExp('\\b' + j + '\\b', 'gi');
+    var matches = text.match(regex);
+    if(matches) found.push({word: j, count: matches.length});
+  });
+  if(found.length === 0) { showToast('No jargon detected', 'success'); return; }
+  var msg = found.sort(function(a,b) { return b.count - a.count; })
+    .map(function(f) { return f.word + ' (' + f.count + 'x)'; }).join(', ');
+  showToast('Jargon found: ' + msg, 'warning');
+}
+
+// ── #126: A/B Testing ──
+function startABTest() {
+  var text = document.getElementById('input').value;
+  if(!text || text.split(/\s+/).length < 10) { alert('Need at least 10 words for A/B test'); return; }
+  var models = Object.keys(MODEL_OPTIONS || {});
+  if(models.length < 2) { alert('Need at least 2 models'); return; }
+  
+  var modelA = models[0]; // Recommended
+  var modelB = models[1]; // Best Quality
+  
+  document.getElementById('abTestPanel').style.display = 'block';
+  document.getElementById('abStatus').textContent = 'Running A/B test...';
+  
+  // Run both in parallel
+  Promise.all([
+    fetch('/api/humanize', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text:text, passes:2, model:modelA, tone:'casual'})}).then(function(r){return r.json();}),
+    fetch('/api/humanize', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({text:text, passes:2, model:modelB, tone:'casual'})}).then(function(r){return r.json();})
+  ]).then(function(results) {
+    // Poll both jobs
+    var jobA = results[0].job_id;
+    var jobB = results[1].job_id;
+    pollABJobs(jobA, jobB);
+  }).catch(function(e) { document.getElementById('abStatus').textContent = 'Error: ' + e.message; });
+}
+function pollABJobs(jobA, jobB) {
+  var doneA = null, doneB = null;
+  function check(jobId, label) {
+    return fetch('/api/progress/' + jobId).then(function(r) { return r.json(); }).then(function(d) {
+      if(d.status === 'done') return d;
+      if(d.status === 'error') throw new Error(d.error);
+      return new Promise(function(resolve) { setTimeout(function() { check(jobId, label).then(resolve); }, 2000); });
+    });
+  }
+  Promise.all([check(jobA, 'A'), check(jobB, 'B')]).then(function(results) {
+    var a = results[0], b = results[1];
+    document.getElementById('abStatus').textContent = 'Done! Vote for the better version:';
+    document.getElementById('abResultA').innerHTML = '<div style="padding:12px;border:1px solid var(--border);border-radius:4px;cursor:pointer;" onclick="voteAB(\'A\')">' +
+      '<div style="font-weight:600;margin-bottom:6px;">Version A <span style="font-size:10px;color:var(--muted);">(Score: ' + (a.output_score?.score||'?') + ')</span></div>' +
+      '<div style="font-size:12px;max-height:150px;overflow-y:auto;">' + (a.result||'').substring(0,500) + '...</div></div>';
+    document.getElementById('abResultB').innerHTML = '<div style="padding:12px;border:1px solid var(--border);border-radius:4px;cursor:pointer;" onclick="voteAB(\'B\')">' +
+      '<div style="font-weight:600;margin-bottom:6px;">Version B <span style="font-size:10px;color:var(--muted);">(Score: ' + (b.output_score?.score||'?') + ')</span></div>' +
+      '<div style="font-size:12px;max-height:150px;overflow-y:auto;">' + (b.result||'').substring(0,500) + '...</div></div>';
+    window._abResults = {A: a, B: b};
+  }).catch(function(e) { document.getElementById('abStatus').textContent = 'Error: ' + e.message; });
+}
+function voteAB(choice) {
+  var r = window._abResults[choice];
+  if(r) {
+    document.getElementById('output').value = r.result;
+    updateWordCount();
+    document.getElementById('abTestPanel').style.display = 'none';
+    showToast('Version ' + choice + ' applied!', 'success');
+  }
+}
+
+// ── #128: Custom Prompts ──
+function showCustomPrompts() {
+  var panel = document.getElementById('customPromptPanel');
+  if(!panel) return;
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  var saved = localStorage.getItem('humanizer_custom_prompt');
+  if(saved) document.getElementById('customPromptText').value = saved;
+}
+function saveCustomPrompt() {
+  var text = document.getElementById('customPromptText').value.trim();
+  if(!text) { alert('Enter a prompt first'); return; }
+  localStorage.setItem('humanizer_custom_prompt', text);
+  showToast('Custom prompt saved!', 'success');
+}
+
+// ── #136: Model Uptime Monitor ──
+var _modelStatus = {};
+function checkModelStatus() {
+  fetch('/api/model-status').then(function(r) { return r.json(); }).then(function(data) {
+    _modelStatus = data;
+    var el = document.getElementById('modelStatus');
+    if(!el) return;
+    var html = Object.entries(data).map(function(entry) {
+      var model = entry[0], status = entry[1];
+      var dot = status.ok ? '<span style="color:#00cc88;">●</span>' : '<span style="color:#ef4444;">●</span>';
+      var latency = status.latency_ms ? status.latency_ms + 'ms' : 'unknown';
+      return '<div style="font-size:11px;padding:2px 0;">' + dot + ' ' + model.split('/').pop() + ' <span style="color:var(--muted);">' + latency + '</span></div>';
+    }).join('');
+    el.innerHTML = html || '<span style="color:var(--muted);">No data</span>';
+  }).catch(function() {});
+}
+
+// ── #102: Export as PDF ──
+function exportPDF() {
+  var text = document.getElementById('output').value;
+  if(!text) { alert('No output to export'); return; }
+  
+  // Use print-to-PDF via hidden iframe
+  var iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = '0';
+  document.body.appendChild(iframe);
+  
+  var doc = iframe.contentWindow.document;
+  doc.open();
+  doc.write('<!DOCTYPE html><html><head><title>Humanized Text</title>' +
+    '<style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:20px;line-height:1.8;color:#222;}' +
+    'h1{font-size:18px;border-bottom:2px solid #222;padding-bottom:8px;margin-bottom:20px;}' +
+    '.meta{font-size:11px;color:#666;margin-bottom:30px;font-family:monospace;}</style></head><body>' +
+    '<h1>Humanized Text</h1>' +
+    '<div class="meta">Generated: ' + new Date().toLocaleString() + ' | Words: ' + text.split(/\s+/).length + '</div>' +
+    '<div>' + text.replace(/\n/g, '<br>') + '</div></body></html>');
+  doc.close();
+  
+  setTimeout(function() {
+    iframe.contentWindow.print();
+    setTimeout(function() { document.body.removeChild(iframe); }, 1000);
+  }, 500);
+}
+
+// ── #7: Intensity Slider UI ──
+function updateIntensityLabel() {
+  var slider = document.getElementById('intensitySlider');
+  var label = document.getElementById('intensityLabel');
+  if(!slider || !label) return;
+  var val = parseInt(slider.value);
+  var names = {1:'Light Touch', 2:'Light', 3:'Moderate', 4:'Strong', 5:'Heavy Rewrite'};
+  label.textContent = names[val] || 'Moderate';
+}
+
+// ── #15: Rewriting Strategy Selector ──
+function setStrategy(strategy) {
+  document.querySelectorAll('.strategy-btn').forEach(function(btn) {
+    btn.classList.toggle('active', btn.dataset.strategy === strategy);
+  });
+  localStorage.setItem('humanizer_strategy', strategy);
+}
+
+// ── #10: Context Memory ──
+var _contextDocs = [];
+function saveToContext(text, label) {
+  _contextDocs.push({text: text.substring(0, 2000), label: label, timestamp: Date.now()});
+  if(_contextDocs.length > 10) _contextDocs.shift();
+  localStorage.setItem('humanizer_context', JSON.stringify(_contextDocs));
+  updateContextPanel();
+}
+function loadContext() {
+  try { _contextDocs = JSON.parse(localStorage.getItem('humanizer_context') || '[]'); } catch(e) { _contextDocs = []; }
+}
+function updateContextPanel() {
+  var el = document.getElementById('contextList');
+  if(!el) return;
+  el.innerHTML = _contextDocs.length === 0 ? '<span style="color:var(--muted);font-size:11px;">No context saved</span>' :
+    _contextDocs.map(function(d, i) {
+      return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);">' +
+        '<span style="color:var(--accent);">#' + (i+1) + '</span> ' + d.label + ' <span style="color:var(--muted);">(' + d.text.split(/\s+/).length + 'w)</span>' +
+      '</div>';
+    }).join('');
+}
+
+// ── #30: Readability Progression ──
+var _readabilityHistory = [];
+function trackReadability(score) {
+  _readabilityHistory.push({score: score, timestamp: Date.now()});
+  if(_readabilityHistory.length > 20) _readabilityHistory.shift();
+  localStorage.setItem('humanizer_readability', JSON.stringify(_readabilityHistory));
+  updateReadabilityChart();
+}
+function updateReadabilityChart() {
+  var el = document.getElementById('readabilityChart');
+  if(!el || _readabilityHistory.length < 2) return;
+  var maxScore = Math.max.apply(null, _readabilityHistory.map(function(r) { return r.score; }));
+  el.innerHTML = _readabilityHistory.map(function(r) {
+    var pct = maxScore > 0 ? Math.round(r.score / maxScore * 100) : 0;
+    var color = r.score < 40 ? '#00cc88' : r.score < 60 ? '#fbbf24' : '#ef4444';
+    return '<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin:2px 0;">' +
+      '<span style="width:40px;color:var(--muted);">' + new Date(r.timestamp).toLocaleTimeString().substring(0,5) + '</span>' +
+      '<div style="flex:1;height:8px;background:var(--surface);border-radius:4px;">' +
+      '<div style="width:' + pct + '%;height:100%;background:' + color + ';border-radius:4px;transition:width 0.3s;"></div></div>' +
+      '<span style="width:30px;text-align:right;">' + r.score + '</span></div>';
+  }).join('');
+}
+
+// ── #44: Watermark Detection ──
+function detectWatermarks(text) {
+  // Check for common invisible watermarks
+  var suspicious = [];
+  // Zero-width characters
+  var zwChars = text.match(/[\u200B\u200C\u200D\uFEFF\u2060]/g);
+  if(zwChars) suspicious.push('Zero-width characters (' + zwChars.length + ')');
+  // Homoglyphs (Cyrillic lookalikes)
+  var cyrillic = text.match(/[\u0400-\u04FF]/g);
+  if(cyrillic) suspicious.push('Cyrillic characters (' + cyrillic.length + ')');
+  // Unusual whitespace
+  var weirdSpace = text.match(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g);
+  if(weirdSpace) suspicious.push('Unusual whitespace (' + weirdSpace.length + ')');
+  return suspicious;
+}
+function scanWatermarks() {
+  var text = document.getElementById('input').value || document.getElementById('output').value;
+  var marks = detectWatermarks(text);
+  if(marks.length === 0) { showToast('No watermarks detected', 'success'); return; }
+  showToast('Found: ' + marks.join(', '), 'warning');
+}
+function removeWatermarks() {
+  var el = document.getElementById('input');
+  var text = el.value;
+  text = text.replace(/[\u200B\u200C\u200D\uFEFF\u2060]/g, '');
+  text = text.replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g, ' ');
+  text = text.replace(/\u00AD/g, ''); // soft hyphen
+  el.value = text;
+  updateWordCount();
+  showToast('Watermarks removed', 'success');
+}
+
+// ── #29: Keyword Density ──
+function analyzeKeywords() {
+  var text = (document.getElementById('output').value || document.getElementById('input').value).toLowerCase();
+  var words = text.match(/\b[a-z]{4,}\b/g) || [];
+  var stop = new Set(['this','that','with','from','have','been','were','will','would','could','should','their','there','they','them','what','when','where','which','about','after','before','between','through','during','each','other','some','such','only','than','into','over','also','just','very','much','more','most','these','those','then','because','while','although','however','therefore','furthermore','moreover','nevertheless','nonetheless','according','including','provide','provide','provides','provided','using','based','related','consider','important','understand','different','specific','general','example','particular','possible','available','individual','particular','significant','additional','following','previous','current','research','study','result','analysis','system','method','process','approach','problem','solution','development','information','technology','application','performance','management','experience','education','knowledge','community','government','development']);
+  var freq = {};
+  words.forEach(function(w) { if(!stop.has(w) && w.length > 3) freq[w] = (freq[w]||0) + 1; });
+  var sorted = Object.entries(freq).sort(function(a,b) { return b[1] - a[1]; }).slice(0, 15);
+  var total = words.length;
+  
+  var el = document.getElementById('keywordDensity');
+  if(!el) return;
+  el.innerHTML = '<div style="font-size:11px;font-weight:600;margin-bottom:6px;">Top Keywords</div>' +
+    sorted.map(function(entry) {
+      var word = entry[0], count = entry[1];
+      var pct = (count / total * 100).toFixed(1);
+      return '<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin:2px 0;">' +
+        '<span style="width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + word + '</span>' +
+        '<div style="flex:1;height:6px;background:var(--surface);border-radius:3px;">' +
+        '<div style="width:' + Math.min(parseFloat(pct) * 10, 100) + '%;height:100%;background:var(--accent);border-radius:3px;"></div></div>' +
+        '<span style="width:40px;text-align:right;color:var(--muted);">' + count + ' (' + pct + '%)</span></div>';
+    }).join('');
+}
+
+// ── Toast notification system ──
+function showToast(msg, type) {
+  type = type || 'info';
+  var colors = {success:'#00cc88', error:'#ef4444', warning:'#fbbf24', info:'#3b82f6'};
+  var toast = document.createElement('div');
+  toast.className = 'toast-notification';
+  toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;background:var(--card);border:1px solid ' + colors[type] + ';border-left:3px solid ' + colors[type] + ';color:var(--text);font-size:12px;z-index:10000;animation:slideIn 0.3s ease;max-width:400px;font-family:Inter,sans-serif;';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(function() { toast.style.animation = 'slideOut 0.3s ease'; setTimeout(function() { toast.remove(); }, 300); }, 3000);
+}
+
+// ── Init all addon features ──
+(function() {
+  // CSS additions
+  var style = document.createElement('style');
+  style.textContent = 
+    '.skel-line{height:12px;background:var(--surface);border-radius:4px;margin:8px 0;animation:shimmer 1.5s infinite;}' +
+    '@keyframes shimmer{0%{opacity:0.5;}50%{opacity:1;}100%{opacity:0.5;}}' +
+    '.skeleton-wrap{padding:16px;}' +
+    '.ctx-menu{position:absolute;background:var(--card);border:1px solid var(--border);border-radius:4px;z-index:9999;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.15);}' +
+    '.ctx-item{padding:8px 14px;font-size:12px;cursor:pointer;transition:background 0.15s;}' +
+    '.ctx-item:hover{background:var(--surface);}' +
+    '.bc-link{color:var(--accent);cursor:pointer;font-size:11px;}' +
+    '.bc-current{color:var(--text);font-size:11px;font-weight:600;}' +
+    '.bc-sep{color:var(--muted);margin:0 4px;font-size:11px;}' +
+    '@keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}' +
+    '@keyframes slideOut{from{transform:translateX(0);opacity:1;}to{transform:translateX(100%);opacity:0;}}' +
+    '.strategy-btn{padding:6px 12px;font-size:11px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;border-radius:4px;transition:all 0.15s;}' +
+    '.strategy-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}';
+  document.head.appendChild(style);
+  
+  // Override updateWordCount to also update extended stats
+  var _origUpdate = window.updateWordCount;
+  window.updateWordCount = function() {
+    if(_origUpdate) _origUpdate();
+    updateExtendedStats();
+    hideEmptyState();
+  };
+  
+  // Init on DOM ready
+  if(document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAddons);
+  } else {
+    initAddons();
+  }
+})();
+
+function initAddons() {
+  initContextMenu();
+  startAutoSave();
+  loadDraft();
+  loadContext();
+  showEmptyState();
+  updateBreadcrumb(['Home']);
+  
+  // Add extended stats container
+  var wcEl = document.querySelector('[id*="wordCount"], [class*="word-count"]');
+  if(wcEl && !document.getElementById('extendedStats')) {
+    var ext = document.createElement('div');
+    ext.id = 'extendedStats';
+    ext.style.cssText = 'margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:4px;';
+    wcEl.parentElement.appendChild(ext);
+  }
+  
+  // Add breadcrumb
+  if(!document.getElementById('breadcrumb')) {
+    var bc = document.createElement('div');
+    bc.id = 'breadcrumb';
+    bc.style.cssText = 'padding:4px 12px;font-size:11px;border-bottom:1px solid var(--border);';
+    var main = document.querySelector('main, .main, #app, body > div:first-child');
+    if(main) main.insertBefore(bc, main.firstChild);
+  }
+  
+  // Check model status periodically
+  checkModelStatus();
+  setInterval(checkModelStatus, 60000);
+  
+  // Load saved strategy
+  var savedStrategy = localStorage.getItem('humanizer_strategy');
+  if(savedStrategy) setStrategy(savedStrategy);
+  
+  // Load readability history
+  try { _readabilityHistory = JSON.parse(localStorage.getItem('humanizer_readability') || '[]'); } catch(e) {}
+  updateReadabilityChart();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ADDON: 39 Features - Stats, Auto-save, Skeleton, Context Menu, etc.
+// ═══════════════════════════════════════════════════════════════
+
+// ── #61, #62, #63: Extended Stats (chars, paragraphs, sentences) ──
+function updateExtendedStats() {
+  var inp = document.getElementById('input').value;
+  var out = document.getElementById('output').value;
+  var statsEl = document.getElementById('extendedStats');
+  if(!statsEl) return;
+  var inChars = inp.length, outChars = out.length;
+  var inParas = inp.trim() ? inp.trim().split(/\n\s*\n/).length : 0;
+  var outParas = out.trim() ? out.trim().split(/\n\s*\n/).length : 0;
+  var inSents = inp.trim() ? (inp.match(/[.!?]+/g) || []).length : 0;
+  var outSents = out.trim() ? (out.match(/[.!?]+/g) || []).length : 0;
+  var inWords = inp.trim() ? inp.trim().split(/\s+/).length : 0;
+  var outWords = out.trim() ? out.trim().split(/\s+/).length : 0;
+  var avgIn = inSents > 0 ? Math.round(inWords / inSents) : 0;
+  var avgOut = outSents > 0 ? Math.round(outWords / outSents) : 0;
+  var uIn = new Set(inp.toLowerCase().match(/\b\w+\b/g) || []).size;
+  var uOut = new Set(out.toLowerCase().match(/\b\w+\b/g) || []).size;
+  statsEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;font-family:JetBrains Mono,monospace;">' +
+    '<div><span style="color:var(--muted);">Chars:</span> '+inChars.toLocaleString()+' → '+outChars.toLocaleString()+'</div>' +
+    '<div><span style="color:var(--muted);">Paras:</span> '+inParas+' → '+outParas+'</div>' +
+    '<div><span style="color:var(--muted);">Sents:</span> '+inSents+' → '+outSents+'</div>' +
+    '<div><span style="color:var(--muted);">Avg/Sent:</span> '+avgIn+' → '+avgOut+'w</div>' +
+    '<div><span style="color:var(--muted);">Unique:</span> '+uIn+' → '+uOut+'</div>' +
+    '<div><span style="color:var(--muted);">Vocab:</span> '+(inWords>0?Math.round(uIn/inWords*100):0)+'% → '+(outWords>0?Math.round(uOut/outWords*100):0)+'%</div></div>';
+}
+
+// ── #72: Auto-save drafts every 30s ──
+var _autoSaveTimer = null;
+function startAutoSave() {
+  if(_autoSaveTimer) clearInterval(_autoSaveTimer);
+  _autoSaveTimer = setInterval(function() {
+    var inp = document.getElementById('input').value;
+    if(inp && inp.length > 50) {
+      localStorage.setItem('humanizer_draft', JSON.stringify({text:inp, saved:new Date().toISOString(), words:inp.split(/\s+/).length}));
+    }
+  }, 30000);
+}
+function loadDraft() {
+  try {
+    var d = JSON.parse(localStorage.getItem('humanizer_draft'));
+    var input = document.getElementById('input');
+    if(d && !input.value && d.text) {
+      input.value = d.text; updateWordCount();
+      showToast('Draft restored ('+d.words+' words)', 'info');
+    }
+  } catch(e) {}
+}
+
+// ── #51: Skeleton Loader ──
+function showSkeleton(el) {
+  if(!el) return;
+  el.innerHTML = '<div class="skeleton-wrap"><div class="skel-line" style="width:90%"></div><div class="skel-line" style="width:75%"></div><div class="skel-line" style="width:85%"></div><div class="skel-line" style="width:60%"></div><div class="skel-line" style="width:80%"></div><div class="skel-line" style="width:70%"></div><div class="skel-line" style="width:90%"></div><div class="skel-line" style="width:45%"></div></div>';
+}
+
+// ── #52: Empty State ──
+function showEmptyState() {
+  var output = document.getElementById('output');
+  if(output && !output.value) {
+    var w = output.parentElement;
+    if(!w.querySelector('.empty-state')) {
+      var es = document.createElement('div');
+      es.className = 'empty-state';
+      es.innerHTML = '<svg viewBox="0 0 200 150" width="120" style="margin:40px auto;display:block;opacity:0.3;"><rect x="30" y="20" width="140" height="110" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="50" y1="45" x2="150" y2="45" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="50" y1="60" x2="130" y2="60" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="50" y1="75" x2="145" y2="75" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="50" y1="90" x2="110" y2="90" stroke="currentColor" stroke-width="1" opacity="0.5"/><circle cx="160" cy="110" r="20" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M155 110 L165 110 M160 105 L160 115" stroke="currentColor" stroke-width="2"/></svg><p style="text-align:center;color:var(--muted);font-style:italic;font-family:Playfair Display,serif;">Paste AI-generated text to humanize</p>';
+      output.style.opacity = '0'; w.insertBefore(es, output);
+    }
+  }
+}
+function hideEmptyState() {
+  var es = document.querySelector('.empty-state');
+  if(es) es.remove();
+  var o = document.getElementById('output');
+  if(o) o.style.opacity = '1';
+}
+
+// ── #55: Context Menu ──
+var _ctxMenu = null;
+function initContextMenu() {
+  document.addEventListener('contextmenu', function(e) {
+    var t = e.target;
+    if(t.tagName === 'TEXTAREA' || t.closest('textarea')) {
+      e.preventDefault(); removeContextMenu();
+      _ctxMenu = document.createElement('div');
+      _ctxMenu.className = 'ctx-menu';
+      [{l:'Humanize Selection',a:function(){humanizeSelection();}},
+       {l:'Grammar Check',a:function(){if(typeof checkGrammar==='function')checkGrammar();}},
+       {l:'Check Readability',a:function(){if(typeof checkReadability==='function')checkReadability();}},
+       {l:'Copy',a:function(){navigator.clipboard.writeText(t.value||t.textContent);showToast('Copied','success');}},
+       {l:'Paste',a:async function(){try{t.value=await navigator.clipboard.readText();updateWordCount();}catch(x){}}},
+       {l:'Clear',a:function(){t.value='';updateWordCount();}},
+       {l:'Detect Jargon',a:function(){detectJargon(t);}},
+       {l:'Scan Watermarks',a:function(){scanWatermarks();}},
+       {l:'Remove Watermarks',a:function(){removeWatermarks();}}
+      ].forEach(function(item) {
+        var d = document.createElement('div');
+        d.className = 'ctx-item'; d.textContent = item.l;
+        d.onclick = function() { item.a(); removeContextMenu(); };
+        _ctxMenu.appendChild(d);
+      });
+      _ctxMenu.style.left = e.pageX+'px'; _ctxMenu.style.top = e.pageY+'px';
+      document.body.appendChild(_ctxMenu);
+    }
+  });
+  document.addEventListener('click', removeContextMenu);
+}
+function removeContextMenu() { if(_ctxMenu){_ctxMenu.remove();_ctxMenu=null;} }
+function humanizeSelection() {
+  var sel = window.getSelection().toString();
+  if(!sel) sel = document.getElementById('input').value;
+  if(sel) { document.getElementById('input').value = sel; if(typeof startHumanize==='function') startHumanize(); }
+}
+
+// ── #56: Breadcrumb ──
+function updateBreadcrumb(path) {
+  var bc = document.getElementById('breadcrumb');
+  if(!bc) return;
+  bc.innerHTML = path.map(function(item,i) {
+    if(i===path.length-1) return '<span class="bc-current">'+item+'</span>';
+    return '<span class="bc-link" onclick="navigateBreadcrumb(\''+item+'\')">'+item+'</span><span class="bc-sep">›</span>';
+  }).join('');
+}
+function navigateBreadcrumb(item) {
+  if(item==='Home') updateBreadcrumb(['Home']);
+  else if(item==='History') updateBreadcrumb(['Home','History']);
+}
+
+// ── #60: Sort History ──
+var _historySortKey = 'date';
+function sortHistory(key) {
+  _historySortKey = key;
+  fetch('/api/history').then(function(r){return r.json();}).then(function(hist) {
+    if(key==='date') hist.sort(function(a,b){return new Date(b.timestamp)-new Date(a.timestamp);});
+    else if(key==='words') hist.sort(function(a,b){return b.output_words-a.output_words;});
+    else if(key==='score') hist.sort(function(a,b){return a.score_after-b.score_after;});
+    renderHistoryList(hist);
+  });
+}
+function renderHistoryList(hist) {
+  var el = document.getElementById('historyList');
+  if(!el) return;
+  el.innerHTML = hist.length===0 ? '<p style="color:var(--muted);padding:12px;">No history</p>' :
+    hist.slice(0,50).map(function(h) {
+      var g = h.grade_after||'?';
+      var gc = g==='HUMAN'?'#00cc88':g==='LIKELY_HUMAN'?'#4ade80':g==='MIXED'?'#fbbf24':'#ef4444';
+      return '<div class="history-item" onclick="loadVersion('+h.id+')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;"><div style="display:flex;justify-content:space-between;"><span style="font-size:12px;">'+h.input_words+'→'+h.output_words+'w</span><span style="font-size:10px;color:'+gc+';font-weight:600;">'+g+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">'+new Date(h.timestamp).toLocaleString()+'</div></div>';
+    }).join('');
+}
+
+// ── #70: Jargon Detector ──
+function detectJargon(target) {
+  var text = target.value || target.textContent;
+  var jargon = ['utilize','leverage','synergize','paradigm','holistic','scalable','robust','seamless','cutting-edge','next-generation','disruptive','innovative','streamline','optimize','facilitate','infrastructure','methodology','framework','deliverable','stakeholder','bandwidth','circle back','deep dive','move the needle','low-hanging fruit','boil the ocean','pivot','ideate','actionable','granular','drill down','touch base','value-add','ecosystem'];
+  var found = [];
+  jargon.forEach(function(j) { var m = text.match(new RegExp('\\b'+j+'\\b','gi')); if(m) found.push({w:j,c:m.length}); });
+  if(!found.length) { showToast('No jargon detected','success'); return; }
+  showToast('Jargon: '+found.sort(function(a,b){return b.c-a.c;}).map(function(f){return f.w+' ('+f.c+'x)';}).join(', '), 'warning');
+}
+
+// ── #126: A/B Testing ──
+function startABTest() {
+  var text = document.getElementById('input').value;
+  if(!text || text.split(/\s+/).length<10) { alert('Need 10+ words'); return; }
+  var panel = document.getElementById('abTestPanel');
+  if(!panel) { alert('A/B panel not found'); return; }
+  panel.style.display = 'block';
+  document.getElementById('abStatus').textContent = 'Running A/B test...';
+  var models = ['cx/gpt-5.5','ag/claude-sonnet-4-6'];
+  Promise.all(models.map(function(m) {
+    return fetch('/api/humanize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,passes:2,model:m,tone:'casual'})}).then(function(r){return r.json();});
+  })).then(function(results) {
+    pollABJobs(results[0].job_id, results[1].job_id);
+  }).catch(function(e){document.getElementById('abStatus').textContent='Error: '+e.message;});
+}
+function pollABJobs(jA, jB) {
+  function poll(jid) {
+    return fetch('/api/progress/'+jid).then(function(r){return r.json();}).then(function(d) {
+      if(d.status==='done') return d;
+      if(d.status==='error') throw new Error(d.error);
+      return new Promise(function(r){setTimeout(function(){poll(jid).then(r);},2000);});
+    });
+  }
+  Promise.all([poll(jA),poll(jB)]).then(function(res) {
+    document.getElementById('abStatus').textContent = 'Vote for better version:';
+    document.getElementById('abResultA').innerHTML = '<div style="padding:12px;border:1px solid var(--border);cursor:pointer;border-radius:4px;" onclick="voteAB(\'A\')"><b>Version A</b> <span style="font-size:10px;color:var(--muted);">(Score: '+(res[0].output_score?.score||'?')+')</span><div style="font-size:12px;max-height:150px;overflow-y:auto;margin-top:6px;">'+(res[0].result||'').substring(0,500)+'...</div></div>';
+    document.getElementById('abResultB').innerHTML = '<div style="padding:12px;border:1px solid var(--border);cursor:pointer;border-radius:4px;" onclick="voteAB(\'B\')"><b>Version B</b> <span style="font-size:10px;color:var(--muted);">(Score: '+(res[1].output_score?.score||'?')+')</span><div style="font-size:12px;max-height:150px;overflow-y:auto;margin-top:6px;">'+(res[1].result||'').substring(0,500)+'...</div></div>';
+    window._abResults = {A:res[0], B:res[1]};
+  }).catch(function(e){document.getElementById('abStatus').textContent='Error: '+e.message;});
+}
+function voteAB(c) {
+  var r = window._abResults[c];
+  if(r) { document.getElementById('output').value=r.result; updateWordCount(); document.getElementById('abTestPanel').style.display='none'; showToast('Version '+c+' applied!','success'); }
+}
+
+// ── #128: Custom Prompts ──
+function showCustomPrompts() {
+  var p = document.getElementById('customPromptPanel');
+  if(!p) return;
+  p.style.display = p.style.display==='none' ? 'block' : 'none';
+  var s = localStorage.getItem('humanizer_custom_prompt');
+  if(s) document.getElementById('customPromptText').value = s;
+}
+function saveCustomPrompt() {
+  var t = document.getElementById('customPromptText').value.trim();
+  if(!t) { alert('Enter a prompt'); return; }
+  localStorage.setItem('humanizer_custom_prompt', t);
+  showToast('Custom prompt saved!','success');
+}
+
+// ── #136: Model Uptime ──
+var _modelStatus = {};
+function checkModelStatus() {
+  fetch('/api/model-status').then(function(r){return r.json();}).then(function(data) {
+    _modelStatus = data;
+    var el = document.getElementById('modelStatus');
+    if(!el) return;
+    el.innerHTML = Object.entries(data).map(function(e) {
+      var m=e[0],s=e[1]; var dot=s.ok?'<span style="color:#00cc88;">●</span>':'<span style="color:#ef4444;">●</span>';
+      return '<div style="font-size:11px;padding:2px 0;">'+dot+' '+m.split('/').pop()+' <span style="color:var(--muted);">'+(s.latency_ms||'?')+'ms</span></div>';
+    }).join('') || '<span style="color:var(--muted);">No data</span>';
+  }).catch(function(){});
+}
+
+// ── #102: Export PDF ──
+function exportPDF() {
+  var text = document.getElementById('output').value;
+  if(!text) { alert('No output'); return; }
+  var iframe = document.createElement('iframe');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+  var d = iframe.contentWindow.document;
+  d.open();
+  d.write('<!DOCTYPE html><html><head><title>Humanized Text</title><style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:20px;line-height:1.8;color:#222;}h1{font-size:18px;border-bottom:2px solid #222;padding-bottom:8px;}.meta{font-size:11px;color:#666;margin-bottom:30px;font-family:monospace;}</style></head><body><h1>Humanized Text</h1><div class="meta">Generated: '+new Date().toLocaleString()+' | Words: '+text.split(/\s+/).length+'</div><div>'+text.replace(/\n/g,'<br>')+'</div></body></html>');
+  d.close();
+  setTimeout(function(){iframe.contentWindow.print();setTimeout(function(){document.body.removeChild(iframe);},1000);},500);
+}
+
+// ── #7: Intensity Slider ──
+function updateIntensityLabel() {
+  var s = document.getElementById('intensitySlider'), l = document.getElementById('intensityLabel');
+  if(!s||!l) return;
+  var v = parseInt(s.value);
+  l.textContent = {1:'Light Touch',2:'Light',3:'Moderate',4:'Strong',5:'Heavy Rewrite'}[v] || 'Moderate';
+}
+
+// ── #15: Strategy Selector ──
+function setStrategy(s) {
+  document.querySelectorAll('.strategy-btn').forEach(function(b){b.classList.toggle('active',b.dataset.strategy===s);});
+  localStorage.setItem('humanizer_strategy', s);
+}
+
+// ── #10: Context Memory ──
+var _contextDocs = [];
+function saveToContext(text, label) {
+  _contextDocs.push({text:text.substring(0,2000), label:label, ts:Date.now()});
+  if(_contextDocs.length>10) _contextDocs.shift();
+  localStorage.setItem('humanizer_context', JSON.stringify(_contextDocs));
+  updateContextPanel();
+}
+function loadContext() { try{_contextDocs=JSON.parse(localStorage.getItem('humanizer_context')||'[]');}catch(e){_contextDocs=[];} }
+function updateContextPanel() {
+  var el = document.getElementById('contextList');
+  if(!el) return;
+  el.innerHTML = _contextDocs.length===0 ? '<span style="color:var(--muted);font-size:11px;">No context saved</span>' :
+    _contextDocs.map(function(d,i) {
+      return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);"><span style="color:var(--accent);">#'+(i+1)+'</span> '+d.label+' <span style="color:var(--muted);">('+d.text.split(/\s+/).length+'w)</span></div>';
+    }).join('');
+}
+
+// ── #30: Readability Progression ──
+var _readabilityHistory = [];
+function trackReadability(score) {
+  _readabilityHistory.push({score:score, ts:Date.now()});
+  if(_readabilityHistory.length>20) _readabilityHistory.shift();
+  localStorage.setItem('humanizer_readability', JSON.stringify(_readabilityHistory));
+  updateReadabilityChart();
+}
+function updateReadabilityChart() {
+  var el = document.getElementById('readabilityChart');
+  if(!el || _readabilityHistory.length<2) return;
+  var mx = Math.max.apply(null, _readabilityHistory.map(function(r){return r.score;}));
+  el.innerHTML = _readabilityHistory.map(function(r) {
+    var p = mx>0?Math.round(r.score/mx*100):0;
+    var c = r.score<40?'#00cc88':r.score<60?'#fbbf24':'#ef4444';
+    return '<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin:2px 0;"><span style="width:40px;color:var(--muted);">'+new Date(r.ts).toLocaleTimeString().substring(0,5)+'</span><div style="flex:1;height:8px;background:var(--surface);border-radius:4px;"><div style="width:'+p+'%;height:100%;background:'+c+';border-radius:4px;"></div></div><span style="width:30px;text-align:right;">'+r.score+'</span></div>';
+  }).join('');
+}
+
+// ── #44: Watermark Detection ──
+function detectWatermarks(text) {
+  var s = [];
+  var zw = text.match(/[\u200B\u200C\u200D\uFEFF\u2060]/g);
+  if(zw) s.push('Zero-width chars ('+zw.length+')');
+  var cy = text.match(/[\u0400-\u04FF]/g);
+  if(cy) s.push('Cyrillic chars ('+cy.length+')');
+  var ws = text.match(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g);
+  if(ws) s.push('Unusual whitespace ('+ws.length+')');
+  return s;
+}
+function scanWatermarks() {
+  var text = document.getElementById('input').value || document.getElementById('output').value;
+  var m = detectWatermarks(text);
+  showToast(m.length===0 ? 'No watermarks detected' : 'Found: '+m.join(', '), m.length===0?'success':'warning');
+}
+function removeWatermarks() {
+  var el = document.getElementById('input');
+  el.value = el.value.replace(/[\u200B\u200C\u200D\uFEFF\u2060\u00AD]/g,'').replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g,' ');
+  updateWordCount();
+  showToast('Watermarks removed','success');
+}
+
+// ── #29: Keyword Density ──
+function analyzeKeywords() {
+  var text = (document.getElementById('output').value || document.getElementById('input').value).toLowerCase();
+  var words = text.match(/\b[a-z]{4,}\b/g) || [];
+  var stop = new Set(['this','that','with','from','have','been','were','will','would','could','should','their','there','they','them','what','when','where','which','about','after','before','between','through','during','each','other','some','such','only','than','into','over','also','just','very','much','more','most','these','those','then','because','while','although','however','therefore','furthermore','moreover','nevertheless','according','including','provide','provides','provided','using','based','related','consider','important','understand','different','specific','general','example','particular','possible','available','individual','significant','additional','following','previous','current','research','study','result','analysis','system','method','process','approach','problem','solution','development','information','technology','application','performance','management','experience','education','knowledge','community','government']);
+  var freq = {};
+  words.forEach(function(w){if(!stop.has(w)&&w.length>3) freq[w]=(freq[w]||0)+1;});
+  var sorted = Object.entries(freq).sort(function(a,b){return b[1]-a[1];}).slice(0,15);
+  var total = words.length;
+  var el = document.getElementById('keywordDensity');
+  if(!el) return;
+  el.innerHTML = '<div style="font-size:11px;font-weight:600;margin-bottom:6px;">Top Keywords</div>' +
+    sorted.map(function(e) {
+      var w=e[0],c=e[1],p=(c/total*100).toFixed(1);
+      return '<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin:2px 0;"><span style="width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+w+'</span><div style="flex:1;height:6px;background:var(--surface);border-radius:3px;"><div style="width:'+Math.min(parseFloat(p)*10,100)+'%;height:100%;background:var(--accent);border-radius:3px;"></div></div><span style="width:40px;text-align:right;color:var(--muted);">'+c+' ('+p+'%)</span></div>';
+    }).join('');
+}
+
+// ── Toast ──
+function showToast(msg, type) {
+  type = type||'info';
+  var colors = {success:'#00cc88',error:'#ef4444',warning:'#fbbf24',info:'#3b82f6'};
+  var t = document.createElement('div');
+  t.className = 'toast-notification';
+  t.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;background:var(--card);border:1px solid '+colors[type]+';border-left:3px solid '+colors[type]+';color:var(--text);font-size:12px;z-index:10000;animation:slideIn 0.3s ease;max-width:400px;font-family:Inter,sans-serif;';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(function(){t.style.animation='slideOut 0.3s ease';setTimeout(function(){t.remove();},300);},3000);
+}
+
+// ── Init ──
+(function(){
+  var s = document.createElement('style');
+  s.textContent = '.skel-line{height:12px;background:var(--surface);border-radius:4px;margin:8px 0;animation:shimmer 1.5s infinite;}@keyframes shimmer{0%{opacity:.5;}50%{opacity:1;}100%{opacity:.5;}}.skeleton-wrap{padding:16px;}.ctx-menu{position:absolute;background:var(--card);border:1px solid var(--border);border-radius:4px;z-index:9999;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,.15);}.ctx-item{padding:8px 14px;font-size:12px;cursor:pointer;transition:background .15s;}.ctx-item:hover{background:var(--surface);}.bc-link{color:var(--accent);cursor:pointer;font-size:11px;}.bc-current{color:var(--text);font-size:11px;font-weight:600;}.bc-sep{color:var(--muted);margin:0 4px;font-size:11px;}@keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}@keyframes slideOut{from{transform:translateX(0);opacity:1;}to{transform:translateX(100%);opacity:0;}}.strategy-btn{padding:6px 12px;font-size:11px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;border-radius:4px;transition:all .15s;}.strategy-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}';
+  document.head.appendChild(s);
+  var _orig = window.updateWordCount;
+  window.updateWordCount = function(){if(_orig)_orig();updateExtendedStats();hideEmptyState();};
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',initAddons);
+  else initAddons();
+})();
+
+function initAddons() {
+  initContextMenu(); startAutoSave(); loadDraft(); loadContext(); showEmptyState();
+  updateBreadcrumb(['Home']);
+  var wc = document.querySelector('[id*="wordCount"],[class*="word-count"]');
+  if(wc && !document.getElementById('extendedStats')) {
+    var ext = document.createElement('div'); ext.id='extendedStats';
+    ext.style.cssText='margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:4px;';
+    wc.parentElement.appendChild(ext);
+  }
+  if(!document.getElementById('breadcrumb')) {
+    var bc = document.createElement('div'); bc.id='breadcrumb';
+    bc.style.cssText='padding:4px 12px;font-size:11px;border-bottom:1px solid var(--border);';
+    var main = document.querySelector('main,.main,#app,body > div:first-child');
+    if(main) main.insertBefore(bc, main.firstChild);
+  }
+  checkModelStatus(); setInterval(checkModelStatus, 60000);
+  var ss = localStorage.getItem('humanizer_strategy');
+  if(ss) setStrategy(ss);
+  try{_readabilityHistory=JSON.parse(localStorage.getItem('humanizer_readability')||'[]');}catch(e){}
+  updateReadabilityChart();
+}
+
 </script>
 </body>
 </html>"""
@@ -3429,6 +4643,222 @@ import uuid
 
 JOBS = {}  # {job_id: {status, progress, chunks_done, chunks_total, partial, result, error, time, ...}}
 JOBS_LOCK = threading.Lock()
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# BACKEND ADDON: Preprocessing, Citation Protection, Strategies
+# ═══════════════════════════════════════════════════════════════
+
+# ── #8: Citation Protection ──
+_CITATION_PATTERNS = [
+    r'\[\d+(?:,\s*\d+)*\]',
+    r'\([A-Z][a-z]+,?\s*\d{4}\)',
+    r'\([A-Z][a-z]+\s+et\s+al\.,?\s*\d{4}\)',
+    r'@\w+',
+]
+
+def preserve_citations(text):
+    placeholders = {}
+    counter = [0]
+    def repl(match):
+        key = f"__CITE_{counter[0]}__"
+        placeholders[key] = match.group(0)
+        counter[0] += 1
+        return key
+    protected = text
+    for pattern in _CITATION_PATTERNS:
+        protected = re.sub(pattern, repl, protected, flags=re.IGNORECASE)
+    return protected, placeholders
+
+def restore_citations(text, placeholders):
+    for key, original in placeholders.items():
+        text = text.replace(key, original)
+    return text
+
+# ── #9: Code/Table/Math Protection ──
+_SPECIAL_BLOCK_PATTERNS = [
+    (r'```[\s\S]*?```', 'CODE'),
+    (r'\|[\s\S]*?\|(?:\n\|[\s\S]*?\|)+', 'TABLE'),
+    (r'\$\$[\s\S]*?\$\$', 'MATH_DISPLAY'),
+    (r'\$[^\$\n]+\$', 'MATH_INLINE'),
+    (r'\\begin\{.*?\}[\s\S]*?\\end\{.*?\}', 'LATEX'),
+]
+
+def protect_special_blocks(text):
+    placeholders = {}
+    counter = [0]
+    protected = text
+    for pattern, btype in _SPECIAL_BLOCK_PATTERNS:
+        def repl(match, b=btype, c=counter, p=placeholders):
+            key = f"__{b}_{c[0]}__"
+            p[key] = match.group(0)
+            c[0] += 1
+            return key
+        protected = re.sub(pattern, repl, protected)
+    return protected, placeholders
+
+def restore_special_blocks(text, placeholders):
+    for key, original in placeholders.items():
+        text = text.replace(key, original)
+    return text
+
+# ── #5: Grammar Auto-fix ──
+_GRAMMAR_FIXES = [
+    (r'  +', ' '),
+    (r'\s+([.,!?])', r'\1'),
+    (r'([.!?])([A-Z])', r'\1 \2'),
+    (r'\bi\b', 'I'),
+    (r'\bteh\b', 'the'),
+    (r'\brecieve', 'receive'),
+    (r'\bseperate', 'separate'),
+    (r'\boccured\b', 'occurred'),
+    (r'\buntill\b', 'until'),
+    (r'\balot\b', 'a lot'),
+    (r'\bwierd\b', 'weird'),
+    (r'\bdefinately\b', 'definitely'),
+    (r'\baccomodate\b', 'accommodate'),
+    (r'\boccurance\b', 'occurrence'),
+]
+
+def auto_fix_grammar(text):
+    result = text
+    for pattern, replacement in _GRAMMAR_FIXES:
+        result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+    return result
+
+# ── #7: Humanization Intensity ──
+INTENSITY_PROMPTS = {
+    1: "Make very minor adjustments. Keep original sentence structure almost entirely. Only replace a few AI-sounding phrases.",
+    2: "Make light adjustments. Slightly vary word choices and sentence openings while preserving most original structure.",
+    3: "Apply moderate rewriting. Vary sentence lengths, replace common phrases, adjust some structures while keeping meaning.",
+    4: "Apply strong rewriting. Significantly restructure sentences, use varied vocabulary, change paragraph flow while maintaining core meaning.",
+    5: "Do a heavy rewrite. Completely restructure sentences, use creative vocabulary, vary rhythm dramatically, reorder ideas.",
+}
+
+# ── #15: Rewriting Strategies ──
+STRATEGY_PROMPTS = {
+    "academic": "Maintain formal academic tone. Use discipline-specific terminology, passive voice where appropriate, precise language. Keep citations intact.",
+    "creative": "Use vivid, engaging language. Add metaphors, varied sentence rhythm, creative transitions. Make it feel like a skilled human writer.",
+    "technical": "Simplify jargon where possible. Use clear, precise technical language. Add brief explanations for complex terms. Keep code/formulas intact.",
+    "casual": "Write conversationally. Use contractions, shorter sentences, relatable examples. Like explaining to a friend.",
+}
+
+# ── #17: Synonym Intelligence ──
+_AI_PHRASE_REPLACEMENTS = {
+    "it is important to note that": ["notably,", "worth noting:", "keep in mind:"],
+    "in today's rapidly evolving": ["in today's fast-changing", "in the current", "as"],
+    "delve into": ["explore", "examine", "look at", "dig into"],
+    "it's worth noting": ["notably,", "interestingly,", ""],
+    "in conclusion": ["to wrap up,", "overall,", "finally,"],
+    "furthermore": ["also,", "plus,", "additionally,"],
+    "however": ["but", "though", "that said,"],
+    "moreover": ["also,", "what's more,"],
+    "nevertheless": ["still,", "even so,"],
+    "utilize": ["use", "apply", "employ"],
+    "facilitate": ["help", "enable", "support"],
+    "implement": ["set up", "put in place", "start"],
+    "leverage": ["use", "take advantage of", "build on"],
+    "comprehensive": ["thorough", "complete", "full"],
+    "cutting-edge": ["latest", "modern", "advanced"],
+    "innovative": ["new", "creative", "fresh"],
+    "seamless": ["smooth", "easy", "effortless"],
+    "robust": ["strong", "solid", "reliable"],
+}
+
+def replace_ai_phrases(text):
+    result = text
+    for phrase, alternatives in _AI_PHRASE_REPLACEMENTS.items():
+        if phrase.lower() in result.lower():
+            alt = random.choice([a for a in alternatives if a])
+            result = re.sub(re.escape(phrase), alt, result, flags=re.IGNORECASE)
+    return result
+
+# ── #18: Sentence Splitting/Combining ──
+def vary_sentence_lengths(text):
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    result = []
+    i = 0
+    while i < len(sentences):
+        s = sentences[i]
+        words = s.split()
+        if len(words) > 30 and ',' in s:
+            parts = s.split(',', 1)
+            if len(parts) == 2 and len(parts[0].split()) > 5:
+                result.append(parts[0].strip() + '.')
+                result.append(parts[1].strip().capitalize() if parts[1].strip() else '')
+                i += 1
+                continue
+        if len(words) < 8 and i + 1 < len(sentences) and len(sentences[i+1].split()) < 8:
+            combined = s.rstrip('.') + ', and ' + sentences[i+1][0].lower() + sentences[i+1][1:]
+            result.append(combined)
+            i += 2
+            continue
+        result.append(s)
+        i += 1
+    return ' '.join(result)
+
+# ── #16: Paragraph Reordering ──
+def reorder_within_paragraphs(text):
+    paragraphs = text.split('\n\n')
+    result = []
+    for para in paragraphs:
+        sentences = re.split(r'(?<=[.!?])\s+', para.strip())
+        if len(sentences) > 4:
+            mid = sentences[1:-1]
+            random.shuffle(mid)
+            sentences = [sentences[0]] + mid + [sentences[-1]]
+        result.append(' '.join(sentences))
+    return '\n\n'.join(result)
+
+# ── #19: Voice Consistency ──
+def check_voice_consistency(text):
+    formal = ['therefore', 'furthermore', 'consequently', 'hence', 'thus', 'moreover']
+    casual = ["don't", "can't", "won't", "it's", "that's", "gonna", "wanna", "kinda"]
+    fc = sum(1 for m in formal if m in text.lower())
+    cc = sum(1 for m in casual if m in text.lower())
+    if fc > 2 and cc > 2:
+        return {"consistent": False, "formal": fc, "casual": cc, "message": "Mixed voice"}
+    return {"consistent": True, "formal": fc, "casual": cc, "message": "Consistent voice"}
+
+# ── #13: Semantic Similarity ──
+def calc_semantic_similarity(text1, text2):
+    w1 = set(re.findall(r'\b\w+\b', text1.lower()))
+    w2 = set(re.findall(r'\b\w+\b', text2.lower()))
+    if not w1 or not w2:
+        return 0
+    overlap = len(w1 & w2)
+    union = len(w1 | w2)
+    return round(overlap / union * 100, 1) if union > 0 else 0
+
+# ── #25: Citation Formatter ──
+def format_citations(text, style="apa"):
+    if style == "apa":
+        text = re.sub(r'\(([A-Z][a-z]+),\s*(\d{4})\)', r'(\1, \2)', text)
+    elif style == "mla":
+        text = re.sub(r'\(([A-Z][a-z]+),?\s*(\d{4})\)', r'(\1 \2)', text)
+    elif style == "chicago":
+        text = re.sub(r'\(([A-Z][a-z]+),?\s*(\d{4})\)', r'(\1, \2)', text)
+    return text
+
+# ── #79: Retry Failed Chunks ──
+MAX_CHUNK_RETRIES = 2
+
+# ── #137: Model Fallback ──
+MODEL_FALLBACK = [
+    "cx/gpt-5.5",
+    "ag/claude-sonnet-4-6",
+    "ag/gemini-3-flash",
+    "ag/gpt-oss-120b-medium",
+    "cx/gpt-5.4",
+]
+
+# ── Model Status ──
+MODEL_LATENCY = {}
+
+def update_model_latency(model, latency_ms, ok=True):
+    MODEL_LATENCY[model] = {"ok": ok, "latency_ms": round(latency_ms), "last_check": time.time()}
+
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -3450,6 +4880,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response({"error": "Version not found"}, 404)
         elif self.path == "/api/stats":
             self._json_response(STATS)
+        elif self.path == "/api/model-status":
+            self._json_response(MODEL_LATENCY if MODEL_LATENCY else {m: {"ok": True, "latency_ms": 0, "last_check": 0} for m in list(MODEL_OPTIONS.keys())[:5]})
         elif self.path == "/api/debug-cache":
             self._json_response({
                 "cache_size": len(_LLM_CACHE),
@@ -3511,6 +4943,16 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_download_txt()
         elif self.path == "/api/download/md":
             self._handle_download_md()
+        elif self.path == "/api/voice-check":
+            self._handle_voice_check()
+        elif self.path == "/api/similarity":
+            self._handle_similarity()
+        elif self.path == "/api/citation-format":
+            self._handle_citation_format()
+        elif self.path == "/api/grammar-fix":
+            self._handle_grammar_fix()
+        elif self.path == "/api/keywords":
+            self._handle_keywords()
         elif self.path == "/api/batch":
             self._handle_batch()
         elif self.path == "/api/preview":
@@ -3636,6 +5078,10 @@ class Handler(BaseHTTPRequestHandler):
     def _run_humanize_job(self, job_id, text, passes, model, tone, domain="general", ref_sample="", auto_retry=False, strict_wc=False):
         """Run full humanization in background, updating JOBS dict progressively."""
         t0 = time.time()
+        # Preprocessing pipeline
+        text = auto_fix_grammar(text)  # #5: grammar fix
+        text, cite_placeholders = preserve_citations(text)  # #8: protect citations
+        text, block_placeholders = protect_special_blocks(text)  # #9: protect code/tables/math
         input_words = len(text.split())
         model_label = model or LLM_MODEL
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Job {job_id}: {input_words} words, {passes} passes, model={model_label}, tone={tone}", flush=True)
@@ -3649,8 +5095,14 @@ class Handler(BaseHTTPRequestHandler):
                 # Final: apply custom avoid + restore preserve AFTER all post-processing
                 result = apply_custom_avoid(result)
                 result = restore_custom_preserve(result)
+                # Postprocessing pipeline
+                result = replace_ai_phrases(result)  # #17: synonym intelligence
+                result = vary_sentence_lengths(result)  # #18: sentence variation
+                result = restore_citations(result, cite_placeholders)  # #8: restore citations
+                result = restore_special_blocks(result, block_placeholders)  # #9: restore blocks
                 elapsed = round(time.time() - t0, 1)
                 output_score = calc_detection_score(result)
+                similarity = calc_semantic_similarity(text, result)  # #13: semantic similarity
 
                 # Strict word count enforcement (±5%)
                 # strict_wc is a parameter
@@ -3754,6 +5206,15 @@ class Handler(BaseHTTPRequestHandler):
             for i in range(total_chunks):
                 if processed_chunks[i] is None:
                     processed_chunks[i] = advanced_post_process(chunks[i], tone=tone)
+
+            # Postprocessing pipeline (long text)
+            if processed_chunks:
+                joined = ' '.join([c for c in processed_chunks if c])
+                joined = replace_ai_phrases(joined)
+                joined = vary_sentence_lengths(joined)
+                joined = restore_citations(joined, cite_placeholders)
+                joined = restore_special_blocks(joined, block_placeholders)
+                processed_chunks = [joined]
 
             # Apply domain-specific word replacement
             if domain != 'general':
@@ -3890,6 +5351,66 @@ class Handler(BaseHTTPRequestHandler):
             score = calc_detection_score(text)
             self._json_response({"score": score, "words": len(text.split())})
 
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+
+    def _handle_voice_check(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            result = check_voice_consistency(text)
+            self._json_response(result)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_similarity(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text1 = body.get("text1", "")
+            text2 = body.get("text2", "")
+            score = calc_semantic_similarity(text1, text2)
+            self._json_response({"similarity": score})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_citation_format(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            style = body.get("style", "apa")
+            result = format_citations(text, style)
+            self._json_response({"text": result})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_grammar_fix(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            result = auto_fix_grammar(text)
+            self._json_response({"text": result, "changes": len(text) != len(result)})
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_keywords(self):
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "").lower()
+            words = re.findall(r'\b[a-z]{4,}\b', text)
+            stop = {'this','that','with','from','have','been','were','will','would','could','should','their','there','they','them','what','when','where','which','about','after','before','between','through','during','each','other','some','such','only','than','into','over','also','just','very','much','more','most','these','those','then','because','while','although','however','therefore','furthermore','moreover','nevertheless'}
+            freq = {}
+            for w in words:
+                if w not in stop and len(w) > 3:
+                    freq[w] = freq.get(w, 0) + 1
+            total = len(words)
+            top = sorted(freq.items(), key=lambda x: -x[1])[:20]
+            self._json_response({"keywords": [{"word": w, "count": c, "pct": round(c/total*100, 1)} for w, c in top], "total_words": total})
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
