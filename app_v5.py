@@ -1749,6 +1749,59 @@ def _academic_ultra_short_inject(text):
 
 
 
+# ─── Feature #7: Length-Preserving Mode ─────────────────────────────
+# Target word count = input word count ±5%.
+# Trim excess or expand short sections to match.
+
+
+def length_preserving_adjust(result, target_words, tolerance=0.05):
+    """Adjust output length to match target ± tolerance."""
+    current_words = len(result.split())
+    lower_bound = int(target_words * (1 - tolerance))
+    upper_bound = int(target_words * (1 + tolerance))
+
+    if lower_bound <= current_words <= upper_bound:
+        return result  # Within tolerance, no adjustment needed
+
+    sentences = re.split(r'(?<=[.!?])\s+', result)
+    sentences = [s for s in sentences if s.strip()]
+
+    if current_words > upper_bound:
+        # Too long — trim from end, keeping most important sentences
+        # Keep sentences until we hit target
+        kept = []
+        word_count = 0
+        for s in sentences:
+            sw = len(s.split())
+            if word_count + sw > upper_bound:
+                break
+            kept.append(s)
+            word_count += sw
+        return ' '.join(kept)
+
+    elif current_words < lower_bound:
+        # Too short — duplicate some sentences with variation
+        # This is a fallback; normally LLM expansion is better
+        deficit = lower_bound - current_words
+        added = 0
+        result_sentences = list(sentences)
+        for s in sentences:
+            if added >= deficit:
+                break
+            # Add a bridging sentence that elaborates on the previous
+            words = s.split()
+            if len(words) > 8:
+                # Extract key phrase and create elaboration
+                key_phrase = ' '.join(words[2:6]) if len(words) > 5 else ''
+                if key_phrase:
+                    elaboration = f"This relates to {key_phrase.lower()}, which warrants further consideration."
+                    result_sentences.append(elaboration)
+                    added += len(elaboration.split())
+        return ' '.join(result_sentences)
+
+    return result
+
+
 # ─── Feature #3: Real Detection API (ZeroGPT) ──────────────────────
 # Run output through ZeroGPT API as final verification.
 # If score high, return real score alongside internal score.
@@ -6259,6 +6312,15 @@ class Handler(BaseHTTPRequestHandler):
             # #2 Style consistency — match first 30% fingerprint
             if len(result.split()) > 200:
                 result = style_consistency_post_stitch(result)
+
+            # #7 Length-preserving — match input word count ±5%
+            input_word_count = len(text.split())
+            if input_word_count > 100:
+                pre_len = len(result.split())
+                result = length_preserving_adjust(result, input_word_count, tolerance=0.05)
+                post_len = len(result.split())
+                if pre_len != post_len:
+                    print(f"[{job_id}] Length adjust: {pre_len} → {post_len} (target {input_word_count})", flush=True)
 
             # #1 Selective LLM rewrite — target only high-AI sentences
             pre_selective_score = calc_detection_score(result)
