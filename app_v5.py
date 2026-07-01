@@ -147,7 +147,7 @@ def make_docx(text):
 SYNONYMS = {
     "important": ["key", "big", "major", "critical"],
     "shows": ["demonstrates", "reveals", "highlights", "proves"],
-    "use": ["rely on", "go with", "pick", "choose"],
+    "use": ["employ", "go with", "pick", "choose"],
     "good": ["solid", "decent", "fine", "great"],
     "change": ["shift", "move", "switch", "swap"],
     "help": ["support", "assist", "guide", "aid"],
@@ -760,13 +760,13 @@ def ultra_short_inject(text):
 
 
 def filler_inject(text):
-    """Insert filler phrases at random positions. ~1 per 80 words."""
+    """Insert filler phrases at random positions. ~1 per 150 words."""
     random.seed(hash(text) % 2**32 + 11)
     sentences = re.split(r'(?<=[.!?])\s+', text)
-    if len(sentences) < 3:
+    if len(sentences) < 4:
         return text
     word_count = len(text.split())
-    num_inserts = max(1, word_count // 80)
+    num_inserts = max(1, word_count // 150)
     positions = sorted(random.sample(range(1, len(sentences)), min(num_inserts, len(sentences) - 1)))
     fillers = [random.choice(FILLER_PHRASES) for _ in range(num_inserts)]
     for i, (pos, f) in enumerate(zip(positions, fillers)):
@@ -775,13 +775,13 @@ def filler_inject(text):
 
 
 def pronoun_inject(text):
-    """Prepend personal pronoun starters to ~1 per 120 words."""
+    """Prepend personal pronoun starters to ~1 per 200 words."""
     random.seed(hash(text) % 2**32 + 22)
     sentences = re.split(r'(?<=[.!?])\s+', text)
-    if len(sentences) < 4:
+    if len(sentences) < 5:
         return text
     word_count = len(text.split())
-    num_inserts = max(1, word_count // 120)
+    num_inserts = max(1, word_count // 200)
     candidates = list(range(2, len(sentences) - 1))
     if len(candidates) < num_inserts:
         num_inserts = len(candidates)
@@ -1059,6 +1059,247 @@ def context_aware_fragments(text):
             if not any(prev_start.startswith(f.lower()[:10]) for f in frags):
                 sentences.insert(i, frag + sentences[i][0].lower() + sentences[i][1:])
                 inserted += 1
+
+    return ' '.join(sentences)
+
+
+# ─── Research-Backed Humanization (Rodrigues et al. 2026) ──────────
+# Based on "A linguistic comparison between human- and AI-generated content"
+# Key findings: AI text is too positive, too formal, too uniform, lacks
+# personal references, uses visual-only sensory language, and is too certain.
+
+# Injection markers — used to prevent stacking multiple injections on same sentence
+_INJECTION_MARKERS = [
+    "i had doubts", "this concerned me", "that worried me", "that frustrated me",
+    "it bothered me", "that was annoying", "it felt off", "something didn't sit right",
+    "that made me uneasy", "i struggled with this", "it was disappointing",
+    "that's a problem", "this raised red flags", "i'm not convinced",
+    "perhaps", "arguably", "it seems", "it appears", "in some cases",
+    "to some extent", "it could be argued", "one might say", "in a sense",
+    "last week", "recently", "a few months ago", "these days", "lately",
+    "as of late", "in recent years", "just the other day", "not long ago",
+    "you can hear", "it sounds like", "the noise of", "you can feel",
+    "it touches on", "the weight of", "it resonates", "you sense",
+    "honestly.", "look,", "i mean,", "the thing is,", "truth is,",
+    "from what i've seen,", "in my experience,", "to be honest,",
+]
+
+
+def _has_injection(sentence):
+    """Check if sentence already has an injected fragment."""
+    lower = sentence.lower()
+    return any(marker in lower for marker in _INJECTION_MARKERS)
+
+
+EMOTIONAL_BALANCE_PHRASES = [
+    # Mild negative emotions — AI avoids these, humans use them naturally
+    "That worried me.", "This concerned me.", "I wasn't sure about that.",
+    "That frustrated me.", "It bothered me.", "I had doubts.",
+    "That was annoying.", "It felt off.", "Something didn't sit right.",
+    "That made me uneasy.", "I struggled with this.", "It was disappointing.",
+    "That's a problem.", "This raised red flags.", "I'm not convinced.",
+]
+
+COGNITIVE_TENTATIVENESS = [
+    # Tentativeness markers — AI uses certainty, humans hedge
+    "perhaps", "maybe", "it seems", "it appears", "arguably",
+    "in some cases", "to some extent", "more or less",
+    "it could be argued", "one might say", "in a sense",
+    "to a certain degree", "somewhat", "in principle",
+]
+
+TEMPORAL_REFERENCES = [
+    # Time-specific expressions — humans ground claims in time
+    "last week", "recently", "a few months ago", "these days",
+    "lately", "back in the day", "as of late", "in recent years",
+    "just the other day", "not long ago", "earlier this year",
+]
+
+SENSORY_NON_VISUAL = [
+    # Auditory/tactile/embodied — AI over-relies on visual descriptions
+    "you can hear", "it sounds like", "the noise of",
+    "you can feel", "it touches on", "the weight of",
+    "it resonates", "you sense", "it rings true",
+    "the atmosphere", "the mood", "the tone of",
+]
+
+
+def emotional_balance_inject(text):
+    """Inject mild negative emotions. Paper: AI text is too positive/motivational.
+    Humans naturally express concern, doubt, frustration."""
+    random.seed(hash(text) % 2**32 + 601)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 5:
+        return text
+
+    word_count = len(text.split())
+    # ~1 per 400 words (conservative)
+    num_inserts = max(1, word_count // 400)
+    # Only inject into non-positive sentences
+    positive_words = {'great', 'excellent', 'wonderful', 'amazing', 'fantastic',
+                      'outstanding', 'brilliant', 'perfect', 'love', 'best'}
+
+    candidates = []
+    for i in range(2, len(sentences) - 1):
+        sent_lower = sentences[i].lower()
+        # Skip if sentence already has injection
+        if _has_injection(sentences[i]):
+            continue
+        # Skip if sentence already has negative emotion
+        if any(neg in sent_lower for neg in ['worried', 'concerned', 'frustrated',
+                                              'doubt', 'bothered', 'problem', 'struggled']):
+            continue
+        # Skip if sentence is very positive (don't override)
+        if sum(1 for w in positive_words if w in sent_lower) >= 2:
+            continue
+        candidates.append(i)
+
+    if not candidates:
+        return text
+
+    positions = sorted(random.sample(candidates, min(num_inserts, len(candidates))))
+    for i, pos in enumerate(positions):
+        idx = pos + i
+        if idx < len(sentences):
+            phrase = random.choice(EMOTIONAL_BALANCE_PHRASES)
+            # Append to end of previous sentence instead of standalone
+            if idx > 0:
+                prev = sentences[idx - 1].rstrip('.')
+                sentences[idx - 1] = prev + '. ' + phrase
+
+    return ' '.join(sentences)
+
+
+def cognitive_tentativeness_inject(text):
+    """Replace some certainty markers with hedging. Paper: AI uses too many
+    certainty expressions, humans use tentativeness."""
+    random.seed(hash(text) % 2**32 + 602)
+    words = text.split()
+    word_count = len(words)
+    # ~1 hedge per 250 words
+    num_inserts = max(1, word_count // 250)
+    swapped = 0
+
+    # Target certainty words and replace with hedging
+    CERTAINTY_TARGETS = {
+        'certainly': ['perhaps', 'arguably', 'maybe'],
+        'definitely': ['probably', 'likely', 'in most cases'],
+        'always': ['often', 'usually', 'tends to'],
+        'never': ['rarely', 'seldom', 'hardly ever'],
+        'clearly': ['seemingly', 'apparently', 'it seems'],
+        'obviously': ['it appears', 'presumably', 'one might argue'],
+        'undoubtedly': ['presumably', 'conceivably', 'in all likelihood'],
+        'absolutely': ['largely', 'for the most part', 'to a great extent'],
+    }
+
+    for i, w in enumerate(words):
+        if swapped >= num_inserts:
+            break
+        lower = w.lower().strip('.,!?;:')
+        if lower in CERTAINTY_TARGETS and random.random() < 0.3:
+            replacement = random.choice(CERTAINTY_TARGETS[lower])
+            trail = ''
+            for ch in reversed(w):
+                if ch in '.,!?;:':
+                    trail = ch + trail
+                else:
+                    break
+            # Preserve capitalization
+            if w[0].isupper():
+                replacement = replacement[0].upper() + replacement[1:]
+            words[i] = replacement + trail
+            swapped += 1
+
+    return ' '.join(words)
+
+
+def temporal_reference_inject(text):
+    """Add time-specific grounding. Paper: humans use temporal references
+    like 'novembro', 'terça-feira'. AI avoids them."""
+    random.seed(hash(text) % 2**32 + 603)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 6:
+        return text
+
+    word_count = len(text.split())
+    num_inserts = max(1, word_count // 500)
+
+    # Only inject into sentences without existing temporal markers
+    temporal_existing = {'today', 'yesterday', 'tomorrow', 'now', 'then',
+                         'recently', 'last', 'next', 'ago', 'since',
+                         'monday', 'tuesday', 'wednesday', 'thursday',
+                         'friday', 'january', 'february', 'march', 'april'}
+
+    candidates = []
+    for i in range(1, len(sentences) - 1):
+        sent_lower = sentences[i].lower()
+        # Skip if already has injection
+        if _has_injection(sentences[i]):
+            continue
+        if any(t in sent_lower for t in temporal_existing):
+            continue
+        # Skip very short sentences
+        if len(sentences[i].split()) < 6:
+            continue
+        candidates.append(i)
+
+    if not candidates:
+        return text
+
+    positions = sorted(random.sample(candidates, min(num_inserts, len(candidates))))
+    for i, pos in enumerate(positions):
+        idx = pos + i
+        if idx < len(sentences):
+            ref = random.choice(TEMPORAL_REFERENCES)
+            # Inject at sentence start
+            sent = sentences[idx]
+            sentences[idx] = ref.capitalize() + ", " + sent[0].lower() + sent[1:]
+
+    return ' '.join(sentences)
+
+
+def sensory_variety_inject(text):
+    """Add non-visual sensory language. Paper: AI over-relies on visual
+    descriptions, humans use auditory/tactile/embodied references."""
+    random.seed(hash(text) % 2**32 + 604)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 8:
+        return text
+
+    word_count = len(text.split())
+    # Very conservative: 1 per 600 words
+    num_inserts = max(1, word_count // 600)
+
+    # Only inject into descriptive/analytical sentences
+    visual_words = {'see', 'look', 'view', 'appear', 'visible', 'show',
+                    'display', 'image', 'picture', 'visual'}
+
+    candidates = []
+    for i in range(1, len(sentences) - 1):
+        sent_lower = sentences[i].lower()
+        # Skip if already has injection
+        if _has_injection(sentences[i]):
+            continue
+        # Prefer sentences that already have visual language
+        if any(v in sent_lower for v in visual_words):
+            candidates.append(i)
+        # Or sentences about analysis/evaluation
+        elif any(w in sent_lower for w in ['analysis', 'evaluation', 'assessment',
+                                            'examination', 'study', 'research']):
+            candidates.append(i)
+
+    if not candidates:
+        return text
+
+    positions = sorted(random.sample(candidates, min(num_inserts, len(candidates))))
+    for i, pos in enumerate(positions):
+        idx = pos + i
+        if idx < len(sentences):
+            sensory = random.choice(SENSORY_NON_VISUAL)
+            # Only add if sentence is long enough to absorb it
+            if idx > 0 and len(sentences[idx - 1].split()) > 8:
+                prev = sentences[idx - 1].rstrip('.')
+                sentences[idx - 1] = prev + ' — ' + sensory
 
     return ' '.join(sentences)
 
@@ -1382,6 +1623,9 @@ def advanced_post_process(text, tone="casual"):
         text = emdash_inject(text)
         text = _academic_filler_inject(text)
         text = _academic_ultra_short_inject(text)
+        # Research-backed: hedging + temporal (formal versions)
+        text = cognitive_tentativeness_inject(text)
+        text = temporal_reference_inject(text)
         # Final strip pass to catch anything remaining
         text = _strip_casual_phrases(text)
     else:
@@ -1399,6 +1643,11 @@ def advanced_post_process(text, tone="casual"):
         text = emdash_inject(text)
         text = rhetorical_inject(text)
         text = ultra_short_inject(text)
+        # Research-backed: emotional balance + sensory + hedging + temporal
+        text = emotional_balance_inject(text)
+        text = cognitive_tentativeness_inject(text)
+        text = temporal_reference_inject(text)
+        text = sensory_variety_inject(text)
 
     # New: Perplexity injection + Zipf redistribution
     text = perplexity_inject(text)
@@ -1407,11 +1656,18 @@ def advanced_post_process(text, tone="casual"):
 
     # Final cleanup
     text = re.sub(r'\.\s*\.', '.', text)
+    text = re.sub(r'\.\.+', '.', text)  # Multiple periods
+    text = re.sub(r',\s*,', ',', text)  # Double commas
     text = re.sub(r'\s+([,.!?])', r'\1', text)
     text = re.sub(r'  +', ' ', text)
+    # Fix "and and" from stacked injections
+    text = re.sub(r'\band\s+and\b', 'and', text, flags=re.I)
+    # Fix "also, also" from stacked transitions
+    text = re.sub(r'(\w+),\s*\1,', r'\1,', text, flags=re.I)
     # Ensure space after comma
-    if tone == "academic":
-        text = re.sub(r',(\S)', r', \1', text)
+    text = re.sub(r',(\S)', r', \1', text)
+    # Fix sentence starting with lowercase after period
+    text = re.sub(r'\.\s+([a-z])', lambda m: '. ' + m.group(1).upper(), text)
     return text.strip()
 
 
