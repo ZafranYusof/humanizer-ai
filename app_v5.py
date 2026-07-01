@@ -6031,6 +6031,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_webhook_register()
         elif self.path == "/api/webhooks/delete":
             self._handle_webhook_delete()
+        elif self.path == "/api/ab-test":
+            self._handle_ab_test()
         elif self.path == "/v1/humanize":
             self._handle_dev_api()
         else:
@@ -7012,6 +7014,62 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response({"success": True})
             else:
                 self._json_response({"error": "Webhook not found"}, 404)
+        except Exception as e:
+            self._json_response({"error": str(e)}, 500)
+
+    def _handle_ab_test(self):
+        """#9 A/B Test: generate 2 versions, compare with ZeroGPT."""
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            body = json.loads(self.rfile.read(length))
+            text = body.get("text", "")
+            if not text or len(text.split()) < 10:
+                self._json_response({"error": "Need at least 10 words"}, 400)
+                return
+
+            model_a = body.get("model_a", LLM_MODEL)
+            tone_a = body.get("tone_a", "casual")
+            model_b = body.get("model_b", LLM_MODEL)
+            tone_b = body.get("tone_b", "academic")
+
+            # Generate version A
+            print(f"[ab-test] Generating version A: {model_a}/{tone_a}...", flush=True)
+            result_a = humanize(text, passes=1, model=model_a, tone=tone_a)
+            score_a = calc_detection_score(result_a)
+            zerogpt_a = zerogpt_check(result_a)
+
+            # Generate version B
+            print(f"[ab-test] Generating version B: {model_b}/{tone_b}...", flush=True)
+            result_b = humanize(text, passes=1, model=model_b, tone=tone_b)
+            score_b = calc_detection_score(result_b)
+            zerogpt_b = zerogpt_check(result_b)
+
+            # Determine winner
+            internal_winner = "A" if score_a["score"] < score_b["score"] else "B"
+            zerogpt_winner = None
+            if zerogpt_a.get("score") is not None and zerogpt_b.get("score") is not None:
+                zerogpt_winner = "A" if zerogpt_a["score"] < zerogpt_b["score"] else "B"
+
+            self._json_response({
+                "version_a": {
+                    "text": result_a,
+                    "words": len(result_a.split()),
+                    "internal_score": score_a,
+                    "zerogpt": zerogpt_a,
+                    "config": {"model": model_a, "tone": tone_a},
+                },
+                "version_b": {
+                    "text": result_b,
+                    "words": len(result_b.split()),
+                    "internal_score": score_b,
+                    "zerogpt": zerogpt_b,
+                    "config": {"model": model_b, "tone": tone_b},
+                },
+                "winner": {
+                    "internal": internal_winner,
+                    "zerogpt": zerogpt_winner,
+                },
+            })
         except Exception as e:
             self._json_response({"error": str(e)}, 500)
 
