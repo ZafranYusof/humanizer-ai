@@ -2677,570 +2677,455 @@ HTML = r"""<!DOCTYPE html>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
-    --accent: #00cc88;
-    --bg: #1a1a1a;
-    --card: #0d1117;
-    --border: #2a2a2a;
-    --text: #e0e0e0;
-    --text-muted: #888;
+    --accent: #3b82f6;
+    --accent-hover: #2563eb;
+    --bg: #ffffff;
+    --bg-secondary: #f8fafc;
+    --bg-tertiary: #f1f5f9;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --text-secondary: #64748b;
+    --text-muted: #94a3b8;
+    --success: #22c55e;
+    --error: #ef4444;
+    --warning: #f59e0b;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+    --radius: 12px;
+    --radius-sm: 8px;
   }
-  body { font-family: 'Inter', -apple-system, sans-serif; }
-  h1, h2, h3 { font-family: 'Playfair Display', serif; font-weight: 700; letter-spacing: -0.5px; }
-  .label { font-family: 'JetBrains Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-muted); }
-  .mono { font-family: 'JetBrains Mono', monospace; }
-  body { font-family: 'Inter', -apple-system, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
-  .layout { display: flex; min-height: 100vh; }
-  .sidebar { width: 280px; background: #0d0d0d; border-right: 1px solid #1a1a1a; padding: 16px; overflow-y: auto; flex-shrink: 0; }
-  .sidebar h3 { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
-  .history-item { padding: 10px; border: 1px solid #1a1a1a; border-radius: 6px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
-  .history-item:hover { border-color: #333; background: #111; }
-  .history-item .preview { font-size: 12px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .history-item .meta { font-size: 11px; color: #444; margin-top: 4px; }
-  .history-item .score { color: #00cc88; font-weight: 600; }
-  .container { flex: 1; max-width: 1200px; margin: 0 auto; padding: 24px; }
-  h1 { font-size: 28px; font-weight: 700; color: #fff; margin-bottom: 4px; }
-  .subtitle { color: #666; font-size: 14px; margin-bottom: 24px; }
-  .panels { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .panel { display: flex; flex-direction: column; }
-  .panel-label { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: #888; margin-bottom: 8px; font-weight: 600; }
-  textarea {
-    width: 100%; height: 400px; background: #111; border: 1px solid #222; color: #e0e0e0;
-    padding: 16px; font-size: 14px; line-height: 1.6; resize: vertical; border-radius: 8px;
-    font-family: 'Inter', -apple-system, sans-serif;
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
   }
-  textarea:focus { outline: none; border-color: #00cc88; }
-  textarea::placeholder { color: #444; }
-  .controls { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; flex-wrap: wrap; }
-  button { padding: 12px 24px; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-  .btn-primary { background: #00cc88; color: #000; }
-  .btn-primary:hover { background: #00e099; }
-  .btn-primary:disabled { background: #333; color: #666; cursor: not-allowed; }
-  .btn-secondary { background: #222; color: #ccc; border: 1px solid #333; }
-  .btn-secondary:hover { background: #2a2a2a; }
-  select { padding: 10px 16px; background: #111; border: 1px solid #222; color: #e0e0e0; border-radius: 8px; font-size: 14px; }
-  .status { color: #888; font-size: 13px; padding: 8px 0; }
-  .stats { display: flex; gap: 24px; margin-top: 16px; flex-wrap: wrap; }
-  .stat-value { font-size: 20px; font-weight: 700; color: #00cc88; }
-  .stat-label { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-  .progress-bar { width: 100%; height: 6px; background: #1a1a1a; border-radius: 3px; margin: 8px 0; overflow: hidden; }
-  .progress-fill { height: 100%; background: #00cc88; transition: width 0.3s; border-radius: 3px; }
-  .upload-zone { border: 2px dashed #333; border-radius: 8px; padding: 16px; text-align: center; margin-bottom: 16px; cursor: pointer; transition: all 0.15s; }
-  .upload-zone:hover { border-color: #00cc88; background: #0a1a10; }
-  .upload-zone input { display: none; }
-  .upload-zone label { color: #888; font-size: 13px; cursor: pointer; }
-  .diff-container { display: none; margin-top: 16px; border: 1px solid #222; border-radius: 8px; overflow: hidden; }
-  .diff-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; background: #111; border-bottom: 1px solid #222; }
-  .diff-header h3 { font-size: 14px; color: #fff; }
-  .diff-body { max-height: 500px; overflow-y: auto; padding: 16px; }
-  .diff-sentence { padding: 6px 10px; margin-bottom: 4px; border-radius: 4px; font-size: 13px; line-height: 1.5; cursor: pointer; transition: all 0.15s; }
-  .diff-added { background: rgba(0,204,136,0.1); border-left: 3px solid #00cc88; color: #b0ffd8; }
-  .diff-removed { background: rgba(255,68,68,0.1); border-left: 3px solid #ff4444; color: #ffaaaa; text-decoration: line-through; }
-  .diff-unchanged { background: transparent; color: #666; }
-  .diff-sentence:hover { background: rgba(255,255,255,0.05); }
-  .heatmap-container { display: none; margin-top: 16px; border: 1px solid #222; border-radius: 8px; padding: 16px; }
-  .heatmap-title { font-size: 14px; color: #fff; font-weight: 600; margin-bottom: 12px; }
-  .heatmap-paragraph { padding: 10px; margin-bottom: 6px; border-radius: 4px; font-size: 12px; line-height: 1.4; cursor: pointer; transition: all 0.15s; }
-  .heatmap-paragraph:hover { filter: brightness(1.2); }
-  .heatmap-green { background: rgba(0,204,136,0.15); border-left: 3px solid #00cc88; color: #b0ffd8; }
-  .heatmap-yellow { background: rgba(255,170,0,0.15); border-left: 3px solid #ffaa00; color: #ffd699; }
-  .heatmap-red { background: rgba(255,68,68,0.15); border-left: 3px solid #ff4444; color: #ffaaaa; }
-  .heatmap-score { font-size: 11px; font-weight: 600; margin-left: 8px; }
-  .domain-select { padding: 8px 12px; background: #111; border: 1px solid #222; color: #e0e0e0; border-radius: 6px; font-size: 12px; }
-  .ref-sample { width: 100%; height: 80px; background: #111; border: 1px solid #222; color: #e0e0e0; padding: 8px; font-size: 12px; border-radius: 6px; resize: vertical; margin-top: 8px; }
-  /* v5 new styles */
-  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px; background: #0d0d0d; border: 1px solid #1a1a1a; border-radius: 6px; }
-  .toolbar button { padding: 6px 12px; font-size: 11px; border-radius: 4px; }
-  .tab-bar { display: flex; gap: 0; border-bottom: 1px solid #222; margin-bottom: 12px; }
-  .tab-btn { padding: 8px 16px; font-size: 12px; background: none; color: #666; border: none; cursor: pointer; border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.5px; }
-  .tab-btn.active { color: #00cc88; border-bottom-color: #00cc88; }
-  .tab-btn:hover { color: #aaa; }
-  .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin: 12px 0; }
-  .stat-card { background: #111; border: 1px solid #1a1a1a; border-radius: 6px; padding: 12px; }
-  .stat-card .value { font-size: 18px; font-weight: 700; color: #00cc88; }
-  .stat-card .label { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; margin-top: 2px; }
-  .version-list { max-height: 300px; overflow-y: auto; }
-  .version-item { padding: 8px 12px; border: 1px solid #1a1a1a; border-radius: 4px; margin-bottom: 4px; cursor: pointer; font-size: 12px; }
-  .version-item:hover { border-color: #333; background: #111; }
-  .word-list-area { width: 100%; height: 80px; background: #111; border: 1px solid #222; color: #e0e0e0; padding: 8px; font-size: 12px; border-radius: 4px; resize: vertical; }
-  .export-btns { display: flex; gap: 6px; }
-  .export-btns button { padding: 6px 10px; font-size: 11px; }
-  .theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 100; background: #222; border: 1px solid #333; color: #888; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
-  body.light-mode { background: #f5f5f5; color: #1a1a1a; }
-  body.light-mode .sidebar { background: #fafafa; border-color: #e0e0e0; }
-
-details summary::-webkit-details-marker { color: #00cc88; }
-details summary::marker { color: #00cc88; }
-details[open] summary { color: #00cc88; margin-bottom: 4px; }
-details > div { border-left: 2px solid #1a1a1a; padding-left: 12px; margin-left: 4px; }
-
-/* Floating action bar for Humanize button */
-.humanize-bar {
-  position: sticky; top: 0; z-index: 50;
-  background: rgba(10,10,10,0.95); backdrop-filter: blur(8px);
-  border-bottom: 1px solid #1a1a1a; padding: 12px 0; margin-bottom: 16px;
-  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
-}
-
-
-@keyframes slideInRight {
-  from { transform: translateX(100%); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
-}
-  body.light-mode textarea { background: #fff; border-color: #ddd; color: #1a1a1a; }
-  body.light-mode .stat-card { background: #fff; border-color: #e0e0e0; }
-  body.light-mode .toolbar { background: #fafafa; border-color: #e0e0e0; }
-  body.light-mode .history-item { border-color: #e0e0e0; }
-  body.light-mode .history-item:hover { background: #f0f0f0; }
-  body.light-mode select, body.light-mode .domain-select { background: #fff; border-color: #ddd; color: #1a1a1a; }
-  body.light-mode .btn-secondary { background: #f0f0f0; color: #333; border-color: #ddd; }
-  body.light-mode .diff-unchanged { color: #999; }
-  body.light-mode .heatmap-paragraph { color: #333; }
-
-  /* Micro-animations */
-  button { transition: transform 0.1s, background 0.2s; }
-  button:active { transform: scale(0.96); }
-  .panel, .diff-container, .heatmap-container { animation: slideIn 0.3s ease-out; }
-  @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes fadeScale { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
-  .stat-value { animation: fadeScale 0.4s ease-out; }
-  /* Glassmorphism for floating elements */
-  .toolbar, .theme-toggle { backdrop-filter: blur(8px); background: rgba(13,17,23,0.8); }
-
-  
-  /* Collapsible sidebar */
-  .sidebar { transition: transform 0.3s ease; transform: translateX(0); }
-  .sidebar.collapsed { transform: translateX(-100%); }
-  .hamburger { position: fixed; top: 12px; left: 12px; z-index: 200; background: rgba(13,17,23,0.8); backdrop-filter: blur(8px); border: 1px solid #2a2a2a; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--text); font-size: 18px; display: none; }
-  @media (max-width: 1024px) {
-    .hamburger { display: block; }
-    .sidebar { position: fixed; left: 0; top: 0; height: 100vh; z-index: 150; box-shadow: 4px 0 12px rgba(0,0,0,0.3); }
-    .sidebar.collapsed { transform: translateX(-100%); }
-    .container { margin-left: 0 !important; }
+  /* Dark mode */
+  body.dark {
+    --bg: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-tertiary: #334155;
+    --border: #334155;
+    --text: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
   }
-  /* Floating toolbar */
-  .toolbar { position: sticky; top: 0; z-index: 100; padding: 12px 16px; border-bottom: 1px solid var(--border); }
 
-  
-  /* Drag and drop zone */
-  .drop-zone { position: relative; }
-  .drop-zone.dragover { border-color: var(--accent) !important; background: rgba(0,204,136,0.05); }
-  .drop-zone.dragover::after { content: 'Drop files here'; position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: var(--accent); font-size: 18px; font-weight: 600; pointer-events: none; }
-  textarea.drop-zone { transition: border-color 0.2s, background 0.2s; }
+  /* Top Bar */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+  .logo {
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .logo span { color: var(--accent); }
 
-  
-  /* Step progress indicators */
-  .step-progress { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
-  .step { padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-muted); }
-  .step.done { border-color: var(--accent); color: var(--accent); }
-  .step.active { border-color: var(--accent); color: var(--accent); animation: pulse 1s infinite; }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
-  .step.error { border-color: #ff4444; color: #ff4444; }
+  /* Main Layout */
+  .main {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px;
+  }
 
-  
-  /* Typewriter effect */
-  @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: 0; } }
-  .typewriter-cursor::after { content: '|'; animation: blink 0.8s infinite; color: var(--accent); }
+  /* Controls Bar */
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 16px 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+  }
+  .control-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .control-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  select {
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--bg);
+    cursor: pointer;
+  }
+  select:focus { outline: none; border-color: var(--accent); }
 
-    @media (max-width: 768px) { .panels { grid-template-columns: 1fr; } textarea { height: 250px; } .sidebar { display: none; } }
+  /* Humanize Button */
+  .btn-humanize {
+    padding: 12px 32px;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-left: auto;
+    transition: all 0.15s;
+  }
+  .btn-humanize:hover { background: var(--accent-hover); }
+  .btn-humanize:disabled { background: #94a3b8; cursor: not-allowed; }
+
+  /* Editor Grid */
+  .editors {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+  .editor {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    min-height: 400px;
+  }
+  .editor:focus-within { border-color: var(--accent); }
+  .editor-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .editor-actions { display: flex; gap: 6px; }
+  .editor textarea {
+    flex: 1;
+    padding: 20px;
+    border: none;
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text);
+    background: var(--bg);
+    resize: none;
+    font-family: 'Inter', sans-serif;
+  }
+  .editor textarea:focus { outline: none; }
+  .editor textarea::placeholder { color: var(--text-muted); }
+  .editor-foot {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  /* Stats Bar */
+  .stats {
+    display: flex;
+    gap: 24px;
+    padding: 12px 20px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .stat { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+  .stat-val { font-weight: 600; color: var(--accent); }
+  .stat-lbl { color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
+
+  /* Buttons */
+  .btn {
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    background: var(--bg);
+    color: var(--text-secondary);
+    transition: all 0.15s;
+  }
+  .btn:hover { background: var(--bg-tertiary); color: var(--text); }
+  .btn-sm { padding: 6px 10px; font-size: 11px; }
+  .btn-ghost { border: none; background: none; }
+
+  /* Feature Sections */
+  .features-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .feature-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .feature-title {
+    padding: 12px 16px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    user-select: none;
+  }
+  .feature-title:hover { background: var(--bg-tertiary); }
+  .feature-content {
+    display: none;
+    padding: 16px;
+    border-top: 1px solid var(--border);
+  }
+  .feature-content.open { display: block; }
+
+  /* Progress */
+  .progress-wrap {
+    display: none;
+    margin-bottom: 16px;
+  }
+  .progress-bar {
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    transition: width 0.3s;
+    width: 0%;
+  }
+  .progress-text { font-size: 12px; color: var(--text-muted); }
+
+  /* Toast */
+  .toast-box {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 9999;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .toast {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--accent);
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    box-shadow: var(--shadow-md);
+    animation: slideIn 0.3s ease;
+    max-width: 300px;
+  }
+  .toast-ok { border-left-color: var(--success); }
+  .toast-err { border-left-color: var(--error); }
+  .toast-warn { border-left-color: var(--warning); }
+  @keyframes slideIn {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .editors, .features-grid { grid-template-columns: 1fr; }
+    .controls { flex-direction: column; }
+    .btn-humanize { width: 100%; }
+  }
 </style>
 </head>
 <body>
-<button class="theme-toggle" onclick="toggleTheme()">Light/Dark</button>
-<div class="layout">
-  <div class="sidebar" id="historySidebar">
-    <h3>History</h3>
-    <div id="historyList"><div style="color:#444;font-size:12px;">No history yet</div></div>
-    <h3 style="margin-top:16px;">Versions</h3>
-    <div class="version-list" id="versionList"><div style="color:#444;font-size:12px;">No versions yet</div></div>
+
+<!-- Toast Container -->
+<div class="toast-box" id="toastContainer"></div>
+
+<!-- Top Bar -->
+<div class="topbar">
+  <div class="logo"><span>Humanize</span>AI</div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <button class="btn btn-ghost" onclick="toggleTheme()" title="Toggle dark/light">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+    </button>
+    <button class="btn" onclick="showSettings()">Settings</button>
   </div>
-  <div class="container">
-    <h1>HumanizeAI v3</h1>
-    <p class="subtitle">Multi-pass text humanizer — bypass AI detection (multi-model, length-preserving)</p>
+</div>
 
-    <div class="upload-zone" id="uploadZone" onclick="document.getElementById('fileInput').click()">
-      <input type="file" id="fileInput" accept=".docx,.txt" onchange="uploadFile(this)">
-      <label>📁 Drop .docx or .txt file here, or click to upload</label>
-    </div>
+<div class="main">
 
-    <div style="margin-bottom: 12px;">
-      <details style="border: 1px solid #222; border-radius: 6px; padding: 8px 12px;">
-        <summary style="color: #888; font-size: 12px; cursor: pointer;">Optional: Paste your writing sample (style matching)</summary>
-        <textarea class="ref-sample" id="refSample" placeholder="Paste a sample of YOUR actual writing here. The humanizer will match your style (sentence length, vocabulary, transitions)..."></textarea>
-      </details>
-    </div>
-
-    <div class="toolbar">
-      <!-- Quick Tools Row -->
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
-        <button class="btn-secondary" onclick="runPreview()" style="background:#1a3a2a;border-color:#2a5a3a;">Preview</button>
-        <button class="btn-secondary" onclick="checkGrammar()">Grammar</button>
-        <button class="btn-secondary" onclick="showReadability()">Readability</button>
-        <button class="btn-secondary" onclick="showStatsTab()">Stats</button>
-        <button class="btn-secondary" onclick="runVariants()">Variants</button>
-        <button class="btn-secondary" onclick="checkExternal()">ZeroGPT</button>
-      </div>
-
-      <!-- Export Row -->
-      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
-        <span style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;font-family:JetBrains Mono,monospace;">Export:</span>
-        <button class="btn-secondary" onclick="downloadDocx()">DOCX</button>
-        <button class="btn-secondary" onclick="downloadTxt()">TXT</button>
-        <button class="btn-secondary" onclick="downloadMd()">MD</button>
-        <button class="btn-secondary" onclick="exportPDF()">PDF</button>
-      </div>
-
-      <!-- Advanced Tools (collapsible) -->
-      <details style="margin-bottom:8px;">
-        <summary style="font-size:11px;color:#888;cursor:pointer;text-transform:uppercase;letter-spacing:1px;font-family:JetBrains Mono,monospace;padding:4px 0;">Advanced Tools</summary>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;">
-          <button class="btn-secondary" onclick="togglePanel('detectionScorePanel')">Detection</button>
-          <button class="btn-secondary" onclick="togglePanel('plagiarismPanel')">Plagiarism</button>
-          <button class="btn-secondary" onclick="togglePanel('adversarialPanel')">Adversarial</button>
-          <button class="btn-secondary" onclick="togglePanel('keywordPanel')">Keywords</button>
-          <button class="btn-secondary" onclick="startABTest()">A/B Test</button>
-          <button class="btn-secondary" onclick="showCustomPrompts()">Custom Prompt</button>
-          <button class="btn-secondary" onclick="togglePanel('contextPanel')">Context</button>
-          <button class="btn-secondary" onclick="togglePanel('modelStatusPanel')">Models</button>
-          <button class="btn-secondary" onclick="togglePanel('intensityStrategyPanel')">Intensity</button>
-          <button class="btn-secondary" onclick="showToneSlider()">Tone Slider</button>
-          <button class="btn-secondary" onclick="showStyleTrain()">Style Match</button>
-          <button class="btn-secondary" onclick="togglePanel('captionPanel')">Captions</button>
-        </div>
-      </details>
-
-      <!-- Security Tools (collapsible) -->
-      <details style="margin-bottom:8px;">
-        <summary style="font-size:11px;color:#888;cursor:pointer;text-transform:uppercase;letter-spacing:1px;font-family:JetBrains Mono,monospace;padding:4px 0;">Security & Privacy</summary>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;">
-          <button class="btn-secondary" onclick="togglePanel('encryptionPanel')">Encryption</button>
-          <button class="btn-secondary" onclick="scanWatermarks()">Watermark Scan</button>
-          <button class="btn-secondary" onclick="removeWatermarks()">Remove WM</button>
-          <button class="btn-secondary" onclick="showCustomLists()">Word Lists</button>
-        </div>
-      </details>
-
-      <!-- Settings Row -->
-      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
-        <button class="btn-secondary" onclick="showSettings()">Settings</button>
-        <button class="btn-secondary" onclick="showBatchQueue()">Batch Queue</button>
-        <button class="btn-secondary" onclick="showApiManager()">API Keys</button>
-      </div>
-    </div>
-
-    <div class="controls">
-      <!-- Sticky Action Bar -->
-      <div class="humanize-bar">
-        <button class="btn-primary" id="humanizeBtn" onclick="humanize()" style="padding:14px 32px;font-size:16px;letter-spacing:0.5px;">Humanize</button>
+  <!-- Controls -->
+  <div class="controls">
+    <div class="control-group">
+      <span class="control-label">Passes</span>
       <select id="passes">
-        <option value="3">3 Passes (Best)</option>
-        <option value="2">2 Passes (Faster)</option>
-        <option value="1">1 Pass (Quick)</option>
+        <option value="3">3 (Best)</option>
+        <option value="2">2 (Faster)</option>
+        <option value="1">1 (Quick)</option>
       </select>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Model</span>
       <select id="model">
-        <option value="cx/gpt-5.5" selected>Recommended (GPT-5.5, best quality+length)</option>
-        <option value="ag/claude-sonnet-4-6">Best Quality (Claude Sonnet, ~10s/pass)</option>
-        <option value="ag/gemini-3-flash">Fast (Gemini 3 Flash, ~5s/pass)</option>
-        <option value="ag/gemini-3.5-flash-low">Fastest (Gemini 3.5, ~3s/pass)</option>
-        <option value="ag/gpt-oss-120b-medium">Balanced (GPT-OSS 120B, ~8s/pass)</option>
-        <option value="ag/claude-opus-4-6-thinking">Premium (Opus Thinking, ~25s/pass)</option>
-        <option value="cx/gpt-5.4">High Quality (GPT-5.4, ~8s/pass)</option>
-        <option value="cx/gpt-5.4-mini">Fast Quality (GPT-5.4 Mini, ~4s/pass)</option>
-
+        <option value="">Recommended</option>
+        <option value="cx/gpt-5.4-mini">GPT-5.4 Mini</option>
+        <option value="cx/gpt-5.4">GPT-5.4</option>
+        <option value="ds/deepseek-v4-pro">DeepSeek V4</option>
+        <option value="ag/claude-sonnet-4-6">Claude Sonnet</option>
+        <option value="ag/gemini-3-flash">Gemini 3 Flash</option>
       </select>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Tone</span>
       <select id="tone">
-        <option value="casual">Casual Tone</option>
-        <option value="academic">Academic Tone</option>
-        <option value="business">Business Tone</option>
+        <option value="casual">Casual</option>
+        <option value="academic">Academic</option>
+        <option value="business">Business</option>
       </select>
-      <select id="domain" class="domain-select">
-        <option value="general">General Domain</option>
-        <option value="academic">Academic Domain</option>
-        <option value="tech">Tech Domain</option>
-        <option value="medical">Medical Domain</option>
-        <option value="legal">Legal Domain</option>
+    </div>
+    <div class="control-group">
+      <span class="control-label">Domain</span>
+      <select id="domain">
+        <option value="general">General</option>
+        <option value="academic">Academic</option>
+        <option value="tech">Tech</option>
+        <option value="medical">Medical</option>
+        <option value="legal">Legal</option>
       </select>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <button class="btn-primary" onclick="copyOutput()" style="padding:8px 16px;font-size:12px;">Copy Output</button>
-        <button class="btn-secondary" onclick="downloadDocx()" style="padding:8px 12px;font-size:11px;">Download .docx</button>
-        <button class="btn-secondary" onclick="clearAll()" style="padding:8px 12px;font-size:11px;color:#ff6666;border-color:#ff6666;">Clear</button>
-      </div>
     </div>
-
-    <div class="step-progress" id="stepProgress" style="display:none;"></div>
-    <div class="progress-bar" id="progressBar" style="display:none;">
-      <div class="progress-fill" id="progressFill" style="width:0%"></div>
-    </div>
-
-    <div class="panels">
-      <div class="panel">
-        <div class="panel-label">Input (AI Text)</div>
-        <textarea id="input" placeholder="Paste your AI-generated text here..."></textarea>
-      </div>
-    </div>
-    <div class="tab-content" id="tab-output">
-      <div class="panel-label">Output (Humanized)</div>
-      
-    <div id="outputEmptyState" style="display:flex;align-items:center;justify-content:center;position:absolute;top:0;left:0;right:0;bottom:0;color:#555;flex-direction:column;gap:12px;pointer-events:none;z-index:1;">
-      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="opacity:0.3;">
-        <rect x="8" y="12" width="48" height="40" rx="4" stroke="#555" stroke-width="2" fill="none"/>
-        <line x1="16" y1="22" x2="48" y2="22" stroke="#555" stroke-width="2"/>
-        <line x1="16" y1="30" x2="40" y2="30" stroke="#555" stroke-width="2"/>
-        <line x1="16" y1="38" x2="44" y2="38" stroke="#555" stroke-width="2"/>
-        <line x1="16" y1="46" x2="36" y2="46" stroke="#555" stroke-width="2"/>
-        <circle cx="52" cy="16" r="6" fill="#00cc88" fill-opacity="0.3" stroke="#00cc88" stroke-width="1.5"/>
-        <path d="M49 16 L51 18 L55 14" stroke="#00cc88" stroke-width="1.5" fill="none"/>
-      </svg>
-      <div style="font-family:Playfair Display,serif;font-size:16px;color:#666;">Paste AI text &amp; click Humanize</div>
-      <div style="font-size:11px;color:#444;">or drop a .docx / .txt file anywhere</div>
-    </div>
-
-        <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
-    </div>
-    <div class="tab-content dual" id="tab-both">
-      <div class="panel">
-        <div class="panel-label">Input (AI Text)</div>
-        <textarea id="input-dual" placeholder="Paste AI text here..." oninput="document.getElementById('input').value=this.value"></textarea>
-      </div>
-      <div class="panel">
-        <div class="panel-label">Output (Humanized)</div>
-        <textarea id="output-dual" placeholder="Humanized text..." readonly></textarea>
-      </div>
-    </div>
-
-    <div id="liveWordCount" style="font-size:11px;color:#666;margin-bottom:4px;">Input: 0 words | Output: 0 words</div>
-    <div id="detailStats" style="font-size:10px;color:#555;margin-bottom:8px;font-family:JetBrains Mono,monospace;display:flex;gap:16px;flex-wrap:wrap;">
-      <span>Chars: <b id="statChars">0</b></span>
-      <span>Paras: <b id="statParas">0</b></span>
-      <span>Sents: <b id="statSents">0</b></span>
-      <span>Avg Len: <b id="statAvgLen">0</b></span>
-      <span>Unique: <b id="statUnique">0</b></span>
-      <span>Level: <b id="statLevel">--</b></span>
-    </div>
-    
-    <div id="toastContainer" style="position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
-
-    <div class="status" id="status">Ready | Score: <span id="liveScore" style="color:#666;">--</span></div>
-    <div class="stats" id="stats"></div>
-
-    <div class="heatmap-container" id="heatmapContainer">
-      <div class="heatmap-title">Detection Heatmap (click red paragraphs to re-process)</div>
-      <div id="heatmapBody"></div>
-    </div>
-
-    <div id="statsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Processing Statistics</h3>
-      <div class="stats-grid" id="statsGrid"></div>
-    </div>
-
-    <div id="customListsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:8px;">Custom Word Lists</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Preserve: words to never modify (one per line). Avoid: AI words to always replace.</p>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div>
-          <label style="font-size:11px;color:#888;">Preserve List</label>
-          <textarea class="word-list-area" id="preserveList" placeholder="Malaysia
-UMP
-FYP"></textarea>
-        </div>
-        <div>
-          <label style="font-size:11px;color:#888;">Avoid List</label>
-          <textarea class="word-list-area" id="avoidList" placeholder="delve
-leverage
-utilize"></textarea>
-        </div>
-      </div>
-      <button class="btn-primary" onclick="saveCustomLists()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Save Lists</button>
-    </div>
-
-    <div id="previewPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:8px;">Preview (first 10%)</h3>
-      <div id="previewContent" style="font-size:12px;color:#aaa;line-height:1.6;"></div>
-    </div>
-
-    <div class="diff-container" id="diffContainer">
-      <div class="diff-header">
-        <h3>Side-by-Side Diff</h3>
-        <button class="btn-secondary" onclick="toggleDiff()" style="padding:6px 12px;font-size:12px;">Toggle View</button>
-      </div>
-      <div class="diff-body" id="diffBody"></div>
-    </div>
-
-
-
-    <div id="apiPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">API Provider Management</h3>
-      <div style="margin-bottom:12px;">
-        <input type="text" id="providerName" placeholder="Provider name (e.g., openai)" style="width:30%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;margin-right:8px;">
-        <input type="text" id="apiKey" placeholder="API key" style="width:40%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;margin-right:8px;">
-        <button class="btn-primary" onclick="addProvider()" style="padding:8px 16px;font-size:12px;">Add</button>
-      </div>
-      <div id="providerList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">Loading...</div>
-    </div>
-    <div id="batchPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Batch Queue</h3>
-      <div id="batchList" style="font-size:12px;color:#aaa;max-height:300px;overflow-y:auto;">No files queued</div>
-      <button class="btn-primary" onclick="processBatch()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Process All</button>
-    </div>
-
-    <div id="variantsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Output Variants (pick best)</h3>
-      <div id="variantsResults" style="font-size:12px;color:#aaa;">Generate 3 versions, auto-pick lowest AI score</div>
-    </div>
-    <div id="toneSliderPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Tone Slider</h3>
-      <div style="display:flex;align-items:center;gap:12px;">
-        <span style="font-size:11px;color:#888;">Casual</span>
-        <input type="range" id="toneLevel" min="0" max="1" step="0.1" value="0.5" style="flex:1;">
-        <span style="font-size:11px;color:#888;">Formal</span>
-        <button class="btn-primary" onclick="applyToneSlider()" style="padding:6px 12px;font-size:11px;">Apply</button>
-      </div>
-      <div id="toneResult" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
-    </div>
-    <div id="styleTrainPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Style Training (match your voice)</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Paste 3-5 samples of YOUR writing to train the humanizer on your style.</p>
-      <textarea id="styleSamples" style="width:100%;height:120px;background:#111;border:1px solid #222;color:#e0e0e0;padding:8px;font-size:12px;border-radius:4px;resize:vertical;" placeholder="Paste writing samples here (separated by ---)..."></textarea>
-      <button class="btn-primary" onclick="saveStyleSamples()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Save Style Profile</button>
-      <div id="styleStatus" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
-    </div>
-    <div id="settingsPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Settings</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label style="font-size:11px;color:#888;">Chunk Size</label><input type="number" id="chunkSize" value="400" min="100" max="1000" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-        <div><label style="font-size:11px;color:#888;">Overlap</label><input type="number" id="overlap" value="2" min="0" max="5" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-        <div><label style="font-size:11px;color:#888;">Parallel</label><input type="number" id="parallel" value="4" min="1" max="8" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-        <div><label style="font-size:11px;color:#888;">Creativity</label><input type="number" id="creativity" value="0.6" min="0.1" max="1.0" step="0.1" style="width:100%;padding:8px;background:#111;border:1px solid #222;color:#e0e0e0;border-radius:4px;"></div>
-      </div>
-      <div style="margin-top:12px;">
-        <label style="font-size:11px;color:#888;"><input type="checkbox" id="strictWordCount"> Strict word count (+-5%)</label><br>
-        <label style="font-size:11px;color:#888;"><input type="checkbox" id="autoRetry"> Auto-retry if score > 40</label>
-      </div>
-
-  /* Accent color options */
-  .color-picker { display: flex; gap: 6px; align-items: center; }
-  .color-dot { width: 20px; height: 20px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: border-color 0.2s; }
-  .color-dot:hover, .color-dot.active { border-color: var(--text); }
-  .color-dot[data-color="green"] { background: #00cc88; }
-  .color-dot[data-color="blue"] { background: #3b82f6; }
-  .color-dot[data-color="purple"] { background: #8b5cf6; }
-  .color-dot[data-color="amber"] { background: #f59e0b; }
-
-          <button class="btn-primary" onclick="saveSettings()" style="margin-top:12px;padding:8px 16px;font-size:12px;">Save</button>
-    </div>
-    <div id="grammarPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Grammar Check</h3>
-      <div id="grammarResults" style="font-size:12px;color:#aaa;">Click Grammar to check...</div>
-    </div>
-    <div id="readabilityPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Readability</h3>
-      <div id="readabilityResults" style="font-size:12px;color:#aaa;">Click Readability to analyze...</div>
-      <div id="readabilityChart" style="margin-top:12px;"></div>
-    </div>
-
-    <!-- #6: AI Detection Bypass Scoring -->
-    <div id="detectionScorePanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">AI Detection Scores (Predicted)</h3>
-      <div id="detectionScores" style="font-size:12px;color:#aaa;">Click to scan output against multiple detectors...</div>
-      <button class="btn-primary" onclick="runDetectionScan()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Scan All Detectors</button>
-    </div>
-
-    <!-- #12: Plagiarism Check -->
-    <div id="plagiarismPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Plagiarism Check</h3>
-      <div id="plagiarismResults" style="font-size:12px;color:#aaa;">Check if input already plagiarized...</div>
-      <button class="btn-primary" onclick="runPlagiarismCheck()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Check Plagiarism</button>
-    </div>
-
-    <!-- #14: Adversarial Detection -->
-    <div id="adversarialPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Adversarial Detection Test</h3>
-      <div id="adversarialResults" style="font-size:12px;color:#aaa;">Test output against multiple AI detectors...</div>
-      <button class="btn-primary" onclick="runAdversarialTest()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Run Adversarial Test</button>
-    </div>
-
-    <!-- #41: Encryption -->
-    <div id="encryptionPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">End-to-End Encryption</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Encrypt text before sending to API. Decrypted on client side.</p>
-      <label style="font-size:11px;color:#888;"><input type="checkbox" id="encryptionEnabled"> Enable encryption</label>
-      <div id="encryptionStatus" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
-    </div>
-
-    <!-- #126: A/B Testing -->
-    <div id="abTestPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">A/B Testing (compare 2 models)</h3>
-      <div id="abStatus" style="font-size:12px;color:#aaa;margin-bottom:8px;"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div id="abResultA"></div>
-        <div id="abResultB"></div>
-      </div>
-    </div>
-
-    <!-- #128: Custom Prompts -->
-    <div id="customPromptPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Custom System Prompts</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Write your own system prompt for the LLM. Overrides default instructions.</p>
-      <textarea id="customPromptText" style="width:100%;height:100px;background:#111;border:1px solid #222;color:#e0e0e0;padding:8px;font-size:12px;border-radius:4px;resize:vertical;" placeholder="You are rewriting text to sound..."></textarea>
-      <button class="btn-primary" onclick="saveCustomPrompt()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Save Prompt</button>
-    </div>
-
-    <!-- #10: Context Memory -->
-    <div id="contextPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Context Memory</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Previous documents remembered for consistent style.</p>
-      <div id="contextList" style="max-height:200px;overflow-y:auto;"></div>
-      <button class="btn-secondary" onclick="saveToContext(document.getElementById('input').value, 'Manual Save')" style="margin-top:8px;padding:6px 12px;font-size:11px;">Save Current to Context</button>
-      <button class="btn-secondary" onclick="localStorage.removeItem('humanizer_context');_contextDocs=[];updateContextPanel();" style="margin-top:8px;padding:6px 12px;font-size:11px;">Clear Context</button>
-    </div>
-
-    <!-- #136: Model Status -->
-    <div id="modelStatusPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Model Uptime Monitor</h3>
-      <div id="modelStatus" style="font-size:12px;color:#aaa;">Loading...</div>
-    </div>
-
-    <!-- #29: Keyword Density -->
-    <div id="keywordPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Keyword Density Analyzer</h3>
-      <div id="keywordDensity" style="font-size:12px;color:#aaa;"></div>
-      <button class="btn-primary" onclick="analyzeKeywords()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Analyze Keywords</button>
-    </div>
-
-    <!-- #7: Intensity + #15: Strategy in controls area -->
-    <div id="intensityStrategyPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Intensity & Strategy</h3>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-        <div>
-          <label style="font-size:11px;color:#888;">Humanization Intensity</label>
-          <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-            <span style="font-size:10px;color:#666;">Light</span>
-            <input type="range" id="intensitySlider" min="1" max="5" value="3" oninput="updateIntensityLabel()" style="flex:1;">
-            <span style="font-size:10px;color:#666;">Heavy</span>
-          </div>
-          <div id="intensityLabel" style="font-size:12px;color:#00cc88;text-align:center;margin-top:4px;">Moderate</div>
-        </div>
-        <div>
-          <label style="font-size:11px;color:#888;">Rewriting Strategy</label>
-          <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
-            <button class="strategy-btn active" data-strategy="casual" onclick="setStrategy('casual')">Casual</button>
-            <button class="strategy-btn" data-strategy="academic" onclick="setStrategy('academic')">Academic</button>
-            <button class="strategy-btn" data-strategy="creative" onclick="setStrategy('creative')">Creative</button>
-            <button class="strategy-btn" data-strategy="technical" onclick="setStrategy('technical')">Technical</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- #26: Figure/Table Caption Generator -->
-    <div id="captionPanel" style="display:none;margin-top:16px;border:1px solid #222;border-radius:8px;padding:16px;">
-      <h3 style="font-size:14px;color:#fff;margin-bottom:12px;">Figure/Table Caption Generator</h3>
-      <p style="font-size:11px;color:#666;margin-bottom:8px;">Describe a figure/table, get an academic caption.</p>
-      <textarea id="captionInput" style="width:100%;height:60px;background:#111;border:1px solid #222;color:#e0e0e0;padding:8px;font-size:12px;border-radius:4px;resize:vertical;" placeholder="Describe the figure: bar chart showing sales growth over 5 years..."></textarea>
-      <button class="btn-primary" onclick="generateCaption()" style="margin-top:8px;padding:8px 16px;font-size:12px;">Generate Caption</button>
-      <div id="captionResult" style="margin-top:8px;font-size:12px;color:#aaa;"></div>
-    </div>
-
+    <button class="btn-humanize" id="humanizeBtn" onclick="humanize()">Humanize</button>
   </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-text" id="progressText">Starting...</div>
+  </div>
+
+  <!-- Editors -->
+  <div class="editors">
+    <div class="editor">
+      <div class="editor-head">
+        <span>Input</span>
+        <div class="editor-actions">
+          <button class="btn btn-sm btn-ghost" onclick="clearAll()">Clear</button>
+        </div>
+      </div>
+      <textarea id="input" placeholder="Paste your AI-generated text here..."></textarea>
+      <div class="editor-foot">
+        <span id="inputWords">0 words</span>
+        <span id="inputChars">0 chars</span>
+      </div>
+    </div>
+    <div class="editor">
+      <div class="editor-head">
+        <span>Output</span>
+        <div class="editor-actions">
+          <button class="btn btn-sm btn-ghost" onclick="copyOutput()">Copy</button>
+          <button class="btn btn-sm btn-ghost" onclick="downloadDocx()">DOCX</button>
+        </div>
+      </div>
+      <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
+      <div class="editor-foot">
+        <span id="outputWords">0 words</span>
+        <span id="outputScore">Score: --</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats">
+    <div class="stat"><span class="stat-lbl">Words</span><span class="stat-val" id="sWords">0 → 0</span></div>
+    <div class="stat"><span class="stat-lbl">Kept</span><span class="stat-val" id="sKept">0%</span></div>
+    <div class="stat"><span class="stat-lbl">Score</span><span class="stat-val" id="sScore">--</span></div>
+    <div class="stat"><span class="stat-lbl">Time</span><span class="stat-val" id="sTime">--</span></div>
+    <div class="stat"><span class="stat-lbl">Grade</span><span class="stat-val" id="sGrade">--</span></div>
+  </div>
+
+  <!-- Feature Sections -->
+  <div class="features-grid">
+    <div class="feature-card">
+      <div class="feature-title" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.arrow').textContent=this.nextElementSibling.classList.contains('open')?'▾':'▸'">
+        <span>Analysis</span><span class="arrow">▸</span>
+      </div>
+      <div class="feature-content">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button class="btn" onclick="checkGrammar()">Grammar</button>
+          <button class="btn" onclick="showReadability()">Readability</button>
+          <button class="btn" onclick="checkExternal()">ZeroGPT</button>
+          <button class="btn" onclick="runVariants()">Variants</button>
+          <button class="btn" onclick="showStatsTab()">Stats</button>
+        </div>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-title" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.arrow').textContent=this.nextElementSibling.classList.contains('open')?'▾':'▸'">
+        <span>Advanced</span><span class="arrow">▸</span>
+      </div>
+      <div class="feature-content">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button class="btn" onclick="togglePanel('detectionScorePanel')">Detection</button>
+          <button class="btn" onclick="togglePanel('plagiarismPanel')">Plagiarism</button>
+          <button class="btn" onclick="startABTest()">A/B Test</button>
+          <button class="btn" onclick="showCustomPrompts()">Custom Prompt</button>
+          <button class="btn" onclick="togglePanel('contextPanel')">Context</button>
+          <button class="btn" onclick="togglePanel('intensityStrategyPanel')">Intensity</button>
+        </div>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-title" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.arrow').textContent=this.nextElementSibling.classList.contains('open')?'▾':'▸'">
+        <span>Export</span><span class="arrow">▸</span>
+      </div>
+      <div class="feature-content">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button class="btn" onclick="downloadDocx()">DOCX</button>
+          <button class="btn" onclick="downloadTxt()">TXT</button>
+          <button class="btn" onclick="downloadMd()">MD</button>
+          <button class="btn" onclick="exportPDF()">PDF</button>
+        </div>
+      </div>
+    </div>
+    <div class="feature-card">
+      <div class="feature-title" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.arrow').textContent=this.nextElementSibling.classList.contains('open')?'▾':'▸'">
+        <span>Security</span><span class="arrow">▸</span>
+      </div>
+      <div class="feature-content">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          <button class="btn" onclick="togglePanel('encryptionPanel')">Encryption</button>
+          <button class="btn" onclick="scanWatermarks()">Watermark Scan</button>
+          <button class="btn" onclick="removeWatermarks()">Remove WM</button>
+          <button class="btn" onclick="showCustomLists()">Word Lists</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script>
