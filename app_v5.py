@@ -2152,6 +2152,13 @@ CITATION_PATTERNS = [
     (r'https?://\S+', 'URL'),
     (r'\b\d+\.?\d*\s*%', 'PCT'),
     (r'\b(?:RM|USD|EUR|GBP)\s*[\d,]+\.?\d*', 'MONEY'),
+    # #4 Enhanced academic protection
+    (r'et al\.,?\s*\d{4}', 'ETAL'),                          # et al., 2024
+    (r'\([A-Z][a-z]+\s+\d{1,3}\)', 'MLA'),                    # (Smith 45) MLA style
+    (r'\(\d{4}\)', 'YEAR'),                                    # (2024) standalone year
+    (r'(?<=[.!?])\s*\[\d+(?:,\s*\d+)*\]\s*(?=[A-Z])', 'REFNUM'),  # [1] at sentence end
+    (r'"[^"]{10,200}"', 'QUOTE'),                              # Direct quotes (10-200 chars)
+    (r'\'[^\'"]{10,200}\'', 'QUOTE2'),                         # Single-quote passages
 ]
 
 def _lock_citations(text):
@@ -2164,6 +2171,12 @@ def _lock_citations(text):
         return key
     for pat, tag in CITATION_PATTERNS:
         text = re.sub(pat, lambda m, t=tag: repl(m, t), text, flags=re.IGNORECASE)
+
+    # #4 Protect reference list entries (lines starting with author patterns)
+    # Matches: "Rodrigues, F. A., Sturm, N. F., & Pinheiro, F. L. (2026). ..."
+    ref_pattern = r'^[A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)?(?:,?\s+(?:&\s+)?[A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)?)*\s*\(\d{4}\)\..+$(?m)'
+    text = re.sub(ref_pattern, lambda m: repl(m, 'REFLIST'), text)
+
     return text, placeholders
 
 def _unlock_citations(text, placeholders):
