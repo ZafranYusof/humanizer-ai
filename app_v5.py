@@ -834,6 +834,266 @@ def depassivize(text):
     return text
 
 
+
+
+
+
+
+def jargon_drop(text):
+    """#8: Replace generic terms with domain-specific vocabulary.
+    Increases lexical sophistication that detectors read as human expertise."""
+    random.seed(hash(text) % 2**32 + 333)
+    # Generic -> domain-specific (context-aware)
+    jargon_map = {
+        "healthcare": ["clinical ecosystem", "medical landscape", "care delivery system"],
+        "data": ["datasets", "information assets", "structured records"],
+        "improve": ["optimize", "refine", "elevate"],
+        "technology": ["tech stack", "digital infrastructure", "tooling"],
+        "system": ["framework", "architecture", "pipeline"],
+        "analysis": ["examination", "assessment", "evaluation"],
+        "problem": ["challenge", "bottleneck", "pain point"],
+        "solution": ["approach", "methodology", "intervention"],
+        "result": ["finding", "outcome", "takeaway"],
+        "process": ["workflow", "pipeline", "lifecycle"],
+        "method": ["technique", "methodology", "approach"],
+        "tool": ["instrument", "utility", "mechanism"],
+        "model": ["framework", "construct", "paradigm"],
+        "approach": ["strategy", "methodology", "tactic"],
+        "research": ["investigation", "inquiry", "exploration"],
+    }
+    words = text.split()
+    new_words = []
+    for w in words:
+        low = w.lower().strip('.,;:!?')
+        if low in jargon_map and random.random() < 0.15:
+            replacement = random.choice(jargon_map[low])
+            if w[0].isupper():
+                replacement = replacement[0].upper() + replacement[1:]
+            punct = ''
+            for c in reversed(w):
+                if c in '.,;:!?':
+                    punct = c + punct
+                else:
+                    break
+            new_words.append(replacement + punct)
+        else:
+            new_words.append(w)
+    return ' '.join(new_words)
+
+def paragraph_rhythm(text):
+    """#7: Disrupt uniform paragraph lengths — mix 1-sentence paras with long blocks."""
+    random.seed(hash(text) % 2**32 + 222)
+    # Split into paragraphs (double newline or every ~5-8 sentences)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 10:
+        return text
+
+    # Group sentences into paragraphs with varying sizes
+    paragraphs = []
+    i = 0
+    while i < len(sentences):
+        r = random.random()
+        if r < 0.12:
+            # Single-sentence paragraph (punchy)
+            paragraphs.append(sentences[i].strip())
+            i += 1
+        elif r < 0.20 and i + 6 < len(sentences):
+            # Long paragraph (6-8 sentences)
+            size = random.randint(6, max(6, min(8, len(sentences) - i)))
+            paragraphs.append(' '.join(s.strip() for s in sentences[i:i+size]))
+            i += size
+        else:
+            # Normal paragraph (3-5 sentences)
+            size = random.randint(3, max(3, min(5, len(sentences) - i)))
+            paragraphs.append(' '.join(s.strip() for s in sentences[i:i+size]))
+            i += size
+
+    return '\n\n'.join(paragraphs)
+
+def pronoun_escalation(text):
+    """#5: Inject first-person perspective and personal voice. AI avoids 'I/we/you'."""
+    random.seed(hash(text) % 2**32 + 111)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 6:
+        return text
+    result = []
+    injected = 0
+    max_inject = max(2, len(sentences) // 15)  # ~6-7% of sentences
+
+    for i, s in enumerate(sentences):
+        sc = s.strip()
+        wc = len(sc.split())
+
+        if injected >= max_inject:
+            result.append(sc)
+            continue
+
+        # Convert generic statements to personal observations
+        if wc > 12 and random.random() < 0.08:
+            # Patterns that scream "AI" — rewrite as first person
+            patterns = [
+                (r'^It is (important|clear|evident|notable) that\s+', "What's clear is that "),
+                (r'^This (shows|demonstrates|indicates|suggests) that\s+', "To me, this shows "),
+                (r'^The (importance|significance|impact) of\s+', "I can't overstate the impact of "),
+                (r'^One (key|major|important) (factor|aspect|consideration)\s+', "One thing I've noticed — "),
+                (r'^(However|Moreover|Furthermore|Additionally),\s+', None),
+            ]
+            for pat, replacement in patterns:
+                m = re.match(pat, sc, re.I)
+                if m:
+                    if replacement is None:
+                        # Replace formal transition with personal one
+                        personal_transitions = [
+                            "What's more, ", "On top of that, ", "And here's the thing — ",
+                            "But honestly, ", "What really stands out is that ",
+                        ]
+                        sc = re.sub(pat, random.choice(personal_transitions), sc, count=1, flags=re.I)
+                    else:
+                        sc = re.sub(pat, replacement, sc, count=1, flags=re.I)
+                    injected += 1
+                    break
+
+        # Add "we" perspective to 3% of neutral statements
+        if not injected and wc > 10 and random.random() < 0.03:
+            starters = [
+                "What we're seeing is that ",
+                "In practice, ",
+                "From what I can tell, ",
+                "Realistically, ",
+            ]
+            sc = random.choice(starters) + sc[0].lower() + sc[1:]
+            injected += 1
+
+        result.append(sc)
+    return ' '.join(result)
+
+def syntactic_variation(text):
+    """#3: Vary sentence structures — questions, exclamations, parenthetical asides, inversions."""
+    random.seed(hash(text) % 2**32 + 99)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 6:
+        return text
+    result = []
+    for i, s in enumerate(sentences):
+        sc = s.strip()
+        wc = len(sc.split())
+        r = random.random()
+
+        # Convert 5% of declarative sentences to rhetorical questions
+        if r < 0.05 and wc > 10 and not sc.endswith('?'):
+            # Find the main claim (usually second half)
+            words = sc.split()
+            mid = len(words) // 2
+            # Try to split at "and", "but", "which", "that"
+            break_pts = [j for j, w in enumerate(words) if w.lower().rstrip(',') in ('and', 'but', 'which', 'that', 'so') and 4 < j < wc - 4]
+            if break_pts:
+                bp = break_pts[0]
+                part1 = ' '.join(words[:bp]).rstrip(',').rstrip('.')
+                part2 = ' '.join(words[bp+1:]).rstrip('.')
+                question = f"{part1} — {part2}?"
+                if question[0].islower():
+                    question = question[0].upper() + question[1:]
+                result.append(question)
+                continue
+
+        # Add parenthetical aside to 8% of medium-length sentences
+        if 0.05 <= r < 0.13 and 12 < wc < 25:
+            words = sc.split()
+            # Insert aside at ~40% through the sentence
+            insert_at = int(len(words) * 0.4)
+            asides = [
+                "at least in theory", "for what it's worth", "surprisingly enough",
+                "or so it seems", "in most cases", "more often than not",
+                "believe it or not", "strangely enough", "as it turns out",
+            ]
+            aside = random.choice(asides)
+            words.insert(insert_at, f"— {aside},")
+            result.append(' '.join(words))
+            continue
+
+        # Invert 5% of sentences starting with "This/The/These + noun + verb"
+        if 0.13 <= r < 0.18 and wc > 10:
+            m = re.match(r'^(The|This|These|That|Those)\s+(\w+)\s+(\w+)\s+(.+)', sc)
+            if m:
+                subj = f"{m.group(1)} {m.group(2)}"
+                verb = m.group(3)
+                rest = m.group(4)
+                # Invert: "Critical is the role of..." or "Essential, this approach is."
+                inversions = [
+                    f"{verb.capitalize()} {subj.lower()} {rest}",
+                    f"{rest.rstrip('.')} — {subj.lower()} {verb}.",
+                ]
+                result.append(random.choice(inversions))
+                continue
+
+        result.append(sc)
+    return ' '.join(result)
+
+def perplexity_word_sub(text):
+    """#2: Replace predictable words with less-expected synonyms to boost perplexity.
+    Targets common verbs/adjectives that detectors flag as too predictable."""
+    random.seed(hash(text) % 2**32 + 88)
+    # Common -> less-expected (but natural) synonyms
+    subs = {
+        "improve": ["enhance", "refine", "elevate", "bolster"],
+        "show": ["reveal", "demonstrate", "exhibit", "display"],
+        "help": ["assist", "aid", "facilitate", "support"],
+        "use": ["employ", "adopt", "apply", "leverage"],
+        "make": ["create", "generate", "produce", "yield"],
+        "big": ["substantial", "significant", "considerable", "sizable"],
+        "important": ["crucial", "vital", "essential", "critical"],
+        "change": ["transform", "reshape", "alter", "modify"],
+        "give": ["provide", "offer", "deliver", "supply"],
+        "find": ["discover", "identify", "uncover", "detect"],
+        "think": ["consider", "reckon", "surmise", "gather"],
+        "need": ["require", "demand", "necessitate", "call for"],
+        "start": ["begin", "commence", "initiate", "launch"],
+        "end": ["conclude", "finish", "terminate", "cease"],
+        "get": ["obtain", "acquire", "gain", "secure"],
+        "put": ["place", "position", "set", "insert"],
+        "take": ["capture", "seize", "assume", "adopt"],
+        "come": ["arrive", "emerge", "appear", "surface"],
+        "go": ["proceed", "advance", "head", "move"],
+        "look": ["appear", "seem", "strike one as", "come across as"],
+        "keep": ["maintain", "preserve", "retain", "sustain"],
+        "tell": ["inform", "notify", "advise", "convey"],
+        "work": ["function", "operate", "perform", "yield results"],
+        "seem": ["appear", "come across as", "strike one as", "give the impression of"],
+        "feel": ["sense", "perceive", "experience", "detect"],
+        "leave": ["abandon", "relinquish", "vacate", "depart from"],
+        "bring": ["deliver", "introduce", "yield", "produce"],
+        "write": ["compose", "draft", "author", "pen"],
+        "provide": ["furnish", "supply", "deliver", "extend"],
+        "increase": ["rise", "grow", "expand", "escalate"],
+        "decrease": ["decline", "diminish", "shrink", "drop"],
+        "develop": ["evolve", "progress", "advance", "mature"],
+        "create": ["forge", "build", "establish", "generate"],
+        "result": ["outcome", "consequence", "effect", "aftermath"],
+        "include": ["encompass", "incorporate", "comprise", "embrace"],
+        "suggest": ["indicate", "imply", "point to", "hint at"],
+        "require": ["demand", "necessitate", "call for", "warrant"],
+    }
+    words = text.split()
+    new_words = []
+    for w in words:
+        low = w.lower().strip('.,;:!?')
+        if low in subs and random.random() < 0.25:
+            replacement = random.choice(subs[low])
+            # Preserve capitalization
+            if w[0].isupper():
+                replacement = replacement[0].upper() + replacement[1:]
+            # Preserve trailing punctuation
+            punct = ''
+            for c in reversed(w):
+                if c in '.,;:!?':
+                    punct = c + punct
+                else:
+                    break
+            new_words.append(replacement + punct)
+        else:
+            new_words.append(w)
+    return ' '.join(new_words)
+
 def synonym_rotate(text):
     """Rotate ~10% of matching words with synonyms."""
     random.seed(hash(text) % 2**32 + 44)
@@ -909,6 +1169,55 @@ DIVERSE_STARTERS = [
     "Think about it. ", "The real question is, ", "Not to oversimplify, but ",
     "On the flip side, ", "And here's the kicker — ",
 ]
+
+
+def sentence_length_chaos(text):
+    """#1: Force wild sentence length variation to boost burstiness CV.
+    Target: 20% ultra-short (3-8 words), 10% ultra-long (30+ words), rest medium."""
+    random.seed(hash(text) % 2**32 + 77)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 6:
+        return text
+
+    result = []
+    i = 0
+    while i < len(sentences):
+        s = sentences[i].strip()
+        wc = len(s.split())
+
+        # Merge adjacent short sentences into one long one (10% chance when both <20 words)
+        if i + 1 < len(sentences) and wc < 20 and len(sentences[i+1].split()) < 20 and random.random() < 0.10:
+            next_s = sentences[i+1].strip()
+            # Connect with em-dash, semicolon, or comma+conjunction
+            connector = random.choice([" — ", "; ", ", and ", ". "])
+            merged = s.rstrip('.!?') + connector + next_s.lstrip()
+            if len(merged.split()) >= 25:
+                result.append(merged)
+                i += 2
+                continue
+
+        # Split long sentences into a fragment + rest (15% chance when >20 words)
+        if wc > 20 and random.random() < 0.15:
+            words = s.split()
+            # Find a natural break point (comma, semicolon, em-dash, "and", "but")
+            break_pts = [j for j, w in enumerate(words) if w.rstrip(',;') in ('and', 'but', 'which', 'that', 'while', 'although', 'because', ';', '—') and 5 < j < wc - 5]
+            if break_pts:
+                bp = random.choice(break_pts)
+                part1 = ' '.join(words[:bp+1]).rstrip(',;')
+                part2 = ' '.join(words[bp+1:])
+                if not part1.endswith('.'):
+                    part1 += '.'
+                if part2 and part2[0].islower():
+                    part2 = part2[0].upper() + part2[1:]
+                result.append(part1)
+                result.append(part2)
+                i += 1
+                continue
+
+        result.append(s)
+        i += 1
+
+    return ' '.join(result)
 
 def sentence_starter_diversity(text):
     """Detect repetitive sentence starters and inject variety."""
@@ -1634,8 +1943,14 @@ def advanced_post_process(text, tone="casual"):
         # Casual/Business: mechanical transforms + burstiness only
         # NO filler/colloquial/fragment injectors — LLM already casual
         text = synonym_rotate(text)
+        text = jargon_drop(text)
+        text = perplexity_word_sub(text)
+        text = syntactic_variation(text)
+        text = pronoun_escalation(text)
         text = depassivize(text)
+        text = sentence_length_chaos(text)
         text = sentence_starter_diversity(text)
+        text = paragraph_rhythm(text)
 
     # New: Perplexity injection + Zipf redistribution
     text = perplexity_inject(text)
