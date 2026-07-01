@@ -1660,14 +1660,34 @@ def advanced_post_process(text, tone="casual"):
     text = re.sub(r',\s*,', ',', text)  # Double commas
     text = re.sub(r'\s+([,.!?])', r'\1', text)
     text = re.sub(r'  +', ' ', text)
-    # Fix "and and" from stacked injections
-    text = re.sub(r'\band\s+and\b', 'and', text, flags=re.I)
+    # Fix "and and" / "or or" / "but but" from stacked injections
+    text = re.sub(r'\b(\w+)\s+\1\b', r'\1', text, flags=re.I)
     # Fix "also, also" from stacked transitions
     text = re.sub(r'(\w+),\s*\1,', r'\1,', text, flags=re.I)
     # Ensure space after comma
     text = re.sub(r',(\S)', r', \1', text)
     # Fix sentence starting with lowercase after period
     text = re.sub(r'\.\s+([a-z])', lambda m: '. ' + m.group(1).upper(), text)
+    # Deduplicate near-identical sentences (>80% word overlap)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) > 3:
+        seen = []
+        deduped = []
+        for s in sentences:
+            words = set(s.lower().split())
+            if len(words) < 4:
+                deduped.append(s)
+                continue
+            is_dup = False
+            for prev_words in seen:
+                overlap = len(words & prev_words) / max(len(words), 1)
+                if overlap > 0.85:
+                    is_dup = True
+                    break
+            if not is_dup:
+                deduped.append(s)
+                seen.append(words)
+        text = ' '.join(deduped)
     return text.strip()
 
 
@@ -5967,6 +5987,35 @@ class Handler(BaseHTTPRequestHandler):
             result = paragraph_vary(result)
             result = re.sub(r'  +', ' ', result)
             result = re.sub(r'\.\s*\.', '.', result)
+
+            # Cross-chunk sentence dedup (>70% word overlap)
+            sents = re.split(r'(?<=[.!?])\s+', result)
+            if len(sents) > 5:
+                seen = []
+                deduped = []
+                for s in sents:
+                    words = set(s.lower().split())
+                    if len(words) < 5:
+                        deduped.append(s)
+                        continue
+                    is_dup = False
+                    for prev_words in seen:
+                        overlap = len(words & prev_words) / max(min(len(words), len(prev_words)), 1)
+                        if overlap > 0.85:
+                            is_dup = True
+                            break
+                    if not is_dup:
+                        deduped.append(s)
+                        seen.append(words)
+                result = ' '.join(deduped)
+                dup_removed = len(sents) - len(deduped)
+                if dup_removed > 0:
+                    print(f"[{job_id}] Dedup: removed {dup_removed} duplicate sentences", flush=True)
+
+            # Post-stitch cleanup
+            result = re.sub(r'\b(\w+)\s+\1\b', r'\1', result, flags=re.I)  # "and and" → "and"
+            result = re.sub(r'\.\.+', '.', result)
+            result = re.sub(r',\s*,', ',', result)
 
             # Auto-retry worst chunks
             if AUTO_RETRY:
