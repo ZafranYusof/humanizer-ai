@@ -1815,6 +1815,113 @@ numbered same way.
         return text
 
 
+# ─── Feature #2: Style Consistency Engine ──────────────────────────
+# Extract style fingerprint from first chunk, apply to subsequent chunks.
+# Prevents tone shifts between independently-processed chunks.
+
+
+def extract_style_fingerprint(text):
+    """Extract style metrics from text as a fingerprint."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    sentences = [s for s in sentences if len(s.strip()) > 3]
+    if not sentences:
+        return None
+
+    words = text.split()
+    avg_sentence_len = len(words) / max(len(sentences), 1)
+    avg_word_len = sum(len(w) for w in words) / max(len(words), 1)
+
+    # Contraction ratio
+    contractions = len(re.findall(r"\b\w+['\u2019]\w+\b", text))
+    contraction_ratio = contractions / max(len(words), 1)
+
+    # Formality score (0=casual, 100=formal)
+    formal_words = len(re.findall(r'\b(furthermore|moreover|additionally|consequently|nevertheless|therefore|thus|hence|subsequently|accordingly)\b', text, re.I))
+    casual_words = len(re.findall(r'\b(basically|honestly|actually|pretty|really|kind of|sort of|gonna|wanna|gotta)\b', text, re.I))
+    formality = min(100, max(0, 50 + (formal_words - casual_words) * 10))
+
+    # Vocabulary complexity (unique words / total)
+    unique_ratio = len(set(w.lower() for w in words)) / max(len(words), 1)
+
+    return {
+        'avg_sentence_len': round(avg_sentence_len, 1),
+        'avg_word_len': round(avg_word_len, 1),
+        'contraction_ratio': round(contraction_ratio, 4),
+        'formality': round(formality),
+        'unique_ratio': round(unique_ratio, 3),
+    }
+
+
+def apply_style_consistency(text, fingerprint):
+    """Adjust text to match style fingerprint. Light-touch adjustments."""
+    if not fingerprint:
+        return text
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 2:
+        return text
+
+    # Calculate current metrics
+    words = text.split()
+    current_avg_len = len(words) / max(len(sentences), 1)
+    target_avg_len = fingerprint['avg_sentence_len']
+
+    # If sentence length deviates >30%, try to adjust
+    if abs(current_avg_len - target_avg_len) / max(target_avg_len, 1) > 0.30:
+        # If too short: merge some adjacent short sentences
+        if current_avg_len < target_avg_len * 0.7:
+            merged = []
+            i = 0
+            while i < len(sentences):
+                if i + 1 < len(sentences) and len(sentences[i].split()) < target_avg_len * 0.5:
+                    merged.append(sentences[i].rstrip('.') + ', ' + sentences[i+1][0].lower() + sentences[i+1][1:])
+                    i += 2
+                else:
+                    merged.append(sentences[i])
+                    i += 1
+            text = ' '.join(merged)
+        # If too long: already handled by burstiness_inject splitting
+
+    return text
+
+
+# Style fingerprint cache — set by first chunk, used by subsequent ones
+_STYLE_FINGERPRINT = None
+
+
+def style_consistency_pass(text, is_first_chunk=False):
+    """Extract fingerprint from first chunk, apply to rest."""
+    global _STYLE_FINGERPRINT
+
+    if is_first_chunk:
+        _STYLE_FINGERPRINT = extract_style_fingerprint(text)
+        return text  # Don't modify first chunk — it sets the baseline
+
+    if _STYLE_FINGERPRINT:
+        return apply_style_consistency(text, _STYLE_FINGERPRINT)
+
+    return text
+
+
+def style_consistency_post_stitch(result):
+    """Apply style consistency AFTER stitching. Extract fingerprint from
+    first 30% of text, adjust remaining 70% to match."""
+    words = result.split()
+    if len(words) < 200:
+        return result
+
+    # First 30% sets the baseline
+    split_point = len(words) * 3 // 10
+    first_section = ' '.join(words[:split_point])
+    rest_section = ' '.join(words[split_point:])
+
+    fingerprint = extract_style_fingerprint(first_section)
+    if fingerprint:
+        rest_section = apply_style_consistency(rest_section, fingerprint)
+
+    return first_section + ' ' + rest_section
+
+
 # ─── Processing Stats ───────────────────────────────────────────────
 STATS = {
     "total_jobs": 0,
@@ -6082,6 +6189,10 @@ class Handler(BaseHTTPRequestHandler):
             result = re.sub(r'\b(\w+)\s+\1\b', r'\1', result, flags=re.I)  # "and and" → "and"
             result = re.sub(r'\.\.+', '.', result)
             result = re.sub(r',\s*,', ',', result)
+
+            # #2 Style consistency — match first 30% fingerprint
+            if len(result.split()) > 200:
+                result = style_consistency_post_stitch(result)
 
             # #1 Selective LLM rewrite — target only high-AI sentences
             pre_selective_score = calc_detection_score(result)
