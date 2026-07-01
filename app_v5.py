@@ -8,6 +8,7 @@ import math
 import random
 import re
 import sys
+from difflib import SequenceMatcher
 import cgi
 import io
 import zipfile
@@ -26,7 +27,7 @@ from datetime import datetime
 import os
 LLM_BASE = os.environ.get("LLM_BASE", "http://localhost:20128/v1")
 LLM_KEY = os.environ.get("LLM_KEY", "123456")
-LLM_MODEL = os.environ.get("LLM_MODEL", "cx/gpt-5.5")
+LLM_MODEL = os.environ.get("LLM_MODEL", "ds/deepseek-v4-pro")
 PORT = int(os.environ.get("PORT", 7860))
 
 MODEL_OPTIONS = {
@@ -277,9 +278,9 @@ Keep the output approximately the same length as the input. DO NOT summarize. DO
 Every single idea in the input must appear in the output. If you skip an idea, you fail.
 
 Style rules:
-1. Vary sentence length: mix very short (3-8 words) with longer ones (20-35 words).
+1. Vary sentence length: mix short (8-12 words) with longer ones (20-35 words). Avoid fragments under 5 words — they sound robotic, not human.
 2. Use contractions: don't, isn't, it's, we're, they've, won't, can't, I'm.
-3. Add 2-3 filler phrases naturally: "honestly", "basically", "you know", "I think", "the thing is", "to be fair", "I mean".
+3. NEVER inject filler phrases ("honestly", "basically", "you know", "I think"). NEVER output standalone fragments ("True." "Right." "Huge." "Simple as that." "Kind of."). Every sentence must be 8+ words and convey real information.
 4. Replace formal transitions: "Furthermore"→"Also", "However"→"But", "Therefore"→"So", "Moreover"→"Plus".
 5. Keep ALL facts, data, names, numbers, and key information intact.
 6. Keep the same language as the original.
@@ -287,6 +288,7 @@ Style rules:
 8. Write like a real person explaining to a friend
 
 NEVER: summarize, compress, remove details, add new information, use "delve", "leverage", "utilize", "facilitate", "comprehensive", "robust", "streamline", "landscape", "tapestry", "pivotal", "crucial".
+NEVER: output single-word sentences ("True." "Right." "OK." "Honestly." "Basically."). NEVER repeat the same idea in different words. Each sentence must convey NEW information.
 
 Output ONLY the rewritten text. No explanations, no notes, no meta-commentary."""
 
@@ -1629,25 +1631,11 @@ def advanced_post_process(text, tone="casual"):
         # Final strip pass to catch anything remaining
         text = _strip_casual_phrases(text)
     else:
-        # Casual/Business: full humanization pipeline
-        text = colloquial_inject(text)
+        # Casual/Business: mechanical transforms + burstiness only
+        # NO filler/colloquial/fragment injectors — LLM already casual
         text = synonym_rotate(text)
         text = depassivize(text)
-        text = burstiness_inject(text)
-        text = grammar_imperfections(text)
         text = sentence_starter_diversity(text)
-        text = context_aware_fragments(text)
-        text = filler_inject(text)
-        text = pronoun_inject(text)
-        text = punctuation_inject(text)
-        text = emdash_inject(text)
-        text = rhetorical_inject(text)
-        text = ultra_short_inject(text)
-        # Research-backed: emotional balance + sensory + hedging + temporal
-        text = emotional_balance_inject(text)
-        text = cognitive_tentativeness_inject(text)
-        text = temporal_reference_inject(text)
-        text = sensory_variety_inject(text)
 
     # New: Perplexity injection + Zipf redistribution
     text = perplexity_inject(text)
@@ -2227,7 +2215,7 @@ def _lock_citations(text):
 
     # #4 Protect reference list entries (lines starting with author patterns)
     # Matches: "Rodrigues, F. A., Sturm, N. F., & Pinheiro, F. L. (2026). ..."
-    ref_pattern = r'^[A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)?(?:,?\s+(?:&\s+)?[A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)?)*\s*\(\d{4}\)\..+$(?m)'
+    ref_pattern = r'(?m)^[A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)?(?:,?\s+(?:&\s+)?[A-Z][a-z]+,\s+[A-Z]\.(?:\s+[A-Z]\.)?)*\s*\(\d{4}\)\..+$'
     text = re.sub(ref_pattern, lambda m: repl(m, 'REFLIST'), text)
 
     return text, placeholders
@@ -2492,11 +2480,10 @@ def deduplicate_overlaps(chunks_text):
 
 
 MODEL_FALLBACK_CHAIN = [
-    "cx/gpt-5.5",
-    "cx/gpt-5.4",
-    "cx/gpt-5.4-mini",
+    "ds/deepseek-v4-pro",
+    "gc/gemini-2.5-flash",
+    "gc/gemini-2.5-pro",
     "ag/gemini-3-flash",
-    "ag/gemini-3.5-flash-low",
 ]
 
 def check_output_quality(original, result):
@@ -6282,29 +6269,41 @@ class Handler(BaseHTTPRequestHandler):
             result = re.sub(r'  +', ' ', result)
             result = re.sub(r'\.\s*\.', '.', result)
 
-            # Cross-chunk sentence dedup (>70% word overlap)
+            # Cross-chunk sentence dedup (SequenceMatcher 0.70 threshold)
             sents = re.split(r'(?<=[.!?])\s+', result)
             if len(sents) > 5:
-                seen = []
+                seen_norm = []
                 deduped = []
                 for s in sents:
-                    words = set(s.lower().split())
-                    if len(words) < 5:
+                    norm = s.lower().strip()
+                    if len(norm.split()) < 5:
                         deduped.append(s)
                         continue
                     is_dup = False
-                    for prev_words in seen:
-                        overlap = len(words & prev_words) / max(min(len(words), len(prev_words)), 1)
-                        if overlap > 0.85:
+                    for prev_norm in seen_norm:
+                        ratio = SequenceMatcher(None, prev_norm, norm).ratio()
+                        if ratio > 0.75:
                             is_dup = True
                             break
                     if not is_dup:
                         deduped.append(s)
-                        seen.append(words)
+                        seen_norm.append(norm)
                 result = ' '.join(deduped)
                 dup_removed = len(sents) - len(deduped)
                 if dup_removed > 0:
                     print(f"[{job_id}] Dedup: removed {dup_removed} duplicate sentences", flush=True)
+
+            # Strip filler WORDS from sentences (don't kill whole sentences)
+            junk_fillers = r'(?i)\b(honestly|basically|literally|i mean|truth is|in my experience|fair enough|sound familiar|here.s the deal|from what i.ve seen|it resonates|that said|look|simple as that)\b'
+            result = re.sub(junk_fillers, '', result)
+            result = re.sub(r'\s*([,.])\s*([,.])\s*', r'\1 ', result)  # ",," -> ", "
+            result = re.sub(r'\s{2,}', ' ', result).strip()
+            # Kill ONLY standalone fragments: "Honestly." "I mean," etc as entire sentence
+            sents_for_strip = re.split(r'(?<=[.!?])\s+', result)
+            stripped = [s for s in sents_for_strip if len(s.strip().split()) >= 5]
+            if len(stripped) < len(sents_for_strip):
+                result = ' '.join(stripped)
+                print(f"[{job_id}] Removed {len(sents_for_strip)-len(stripped)} ultra-short fragments", flush=True)
 
             # Post-stitch cleanup
             result = re.sub(r'\b(\w+)\s+\1\b', r'\1', result, flags=re.I)  # "and and" → "and"
@@ -6332,23 +6331,13 @@ class Handler(BaseHTTPRequestHandler):
                 post_selective_score = calc_detection_score(result)
                 print(f"[{job_id}] Selective rewrite: {pre_selective_score['score']} → {post_selective_score['score']}", flush=True)
 
-            # Auto-retry worst chunks
+            # Auto-retry worst chunks (re-process entire result, not individual chunks)
             if AUTO_RETRY:
                 score = calc_detection_score(result)
                 if score['score'] > 40:
-                    print(f"[{job_id}] Score {score['score']} > 40, retrying...", flush=True)
-                    retry_indices = [0, len(chunks)-1] if len(chunks) > 1 else [0]
-                    for idx in retry_indices:
-                        processed = humanize_chunk(chunks[idx], passes, model or LLM_MODEL, tone)
-                        processed = advanced_post_process(processed, tone=tone)
-                        processed_chunks[idx] = processed
-                    processed_chunks = deduplicate_overlaps(processed_chunks)
-                    result = smooth_transitions(processed_chunks, tone=tone)
-                    if tone != "academic":
-                        result = ultra_short_inject(result)
-                    else:
-                        result = _strip_casual_phrases(result)
-                    result = paragraph_vary(result)
+                    print(f"[{job_id}] Score {score['score']} > 40, retrying full result...", flush=True)
+                    result = humanize_chunk(result, passes, model or LLM_MODEL, tone)
+                    result = advanced_post_process(result, tone=tone)
                     result = re.sub(r'  +', ' ', result)
                     result = re.sub(r'\.\s*\.', '.', result)
 
