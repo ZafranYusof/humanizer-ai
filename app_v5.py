@@ -1193,6 +1193,52 @@ CASUAL_PHRASES_TO_STRIP = [
     r'\bProbably[,.]*\s*',
     r'\bSort of[,.]*\s*',
     r'\bKind of[,.]*\s*',
+    r'\bbasically[,.]*\s*',
+    r'\bBasically[,.]*\s*',
+    r'\bThis is significant\.?\s*',
+    r'\bThis is key\.?\s*',
+    r'\bWorth highlighting[,.]*\s*',
+    r'\bWorth noting[,.]*\s*',
+    r'\bOf note[,.]*\s*',
+    r'\bThis matters[,.]*\s*',
+    r'\bCritically[,.]*\s*',
+    r'\bSignificantly[,.]*\s*',
+    r'\bIndeed[,.]*\s*',
+    r'\bMoreover[,.]*\s*',
+    r'\bFurthermore[,.]*\s*',
+    r'\bIn particular[,.]*\s*',
+    r'\bIn essence[,.]*\s*',
+    r'\bEssentially[,.]*\s*',
+    r'\bNotably[,.]*\s*',
+    r'\bIt should be noted[,.]*\s*',
+    r'\bIt is worth noting[,.]*\s*',
+    r'\bAs a matter of fact[,.]*\s*',
+    r'\bNeedless to say[,.]*\s*',
+    r'\bHaving said that[,.]*\s*',
+    r'\bAt the end of the day[,.]*\s*',
+    r'\bFor what it\'s worth[,.]*\s*',
+    r'\bWithout a doubt[,.]*\s*',
+    r'\bIt goes without saying[,.]*\s*',
+    r'\bBut the truth is[,.]*\s*',
+    r'\bActually[,.]*\s*',
+    r'\bJust[,.]*\s*(?=the|a|an|to)',
+    r'\blike[,.]*\s*(?=the|a|an|it|this)',
+    r'\bWell[,.]*\s*',
+    r'\bRight[,.]*\s*',
+    r'\bSure[,.]*\s*',
+    r'\bOK[,.]*\s*',
+    r'\bOkay[,.]*\s*',
+    r'\bYeah[,.]*\s*',
+    r'\bYes[,.]*\s*(?=the|and|but|it)',
+    r'\bNope[,.]*\s*',
+    r'\bLet\'s face it[,.]*\s*',
+    r'\bHere\'s the thing[,.:]*\s*',
+    r'\bLong story short[,.:]*\s*',
+    r'\bBy and large[,.]*\s*',
+    r'\bMore often than not[,.]*\s*',
+    r'\bAt this point[,.]*\s*',
+    r'\bIn terms of[,.]*\s*',
+    r'\bIn the context of[,.]*\s*',
     r'\bright\?\s*',
     r'\bSure[,.]*\s*',
     r'\bWell[,.]*\s*',
@@ -1218,13 +1264,18 @@ def _strip_casual_phrases(text):
         # Skip very short standalone fragments (1-3 words that are just filler)
         if len(words) <= 3:
             lower = s.lower().strip('.,!?')
-            skip_words = {'honestly', 'fair point', 'fair enough', 'makes sense', 'not easy',
-                         'not great', 'big deal', 'true', 'maybe', 'probably', 'sort of',
-                         'kind of', 'right', 'sure', 'well', 'look', 'not surprising',
+            skip_words = {'honestly', 'fair point', 'basically', 'this is significant',
+                         'this is key', 'worth highlighting', 'worth noting', 'of note',
+                         'this matters', 'indeed', 'moreover', 'furthermore',
+                         'in particular', 'in essence', 'essentially', 'notably',
+                         'actually', 'well', 'sure', 'ok', 'okay', 'yeah',
+                         'by and large', 'more often than not', 'at this point',
+                         'fair enough', 'makes sense', 'not easy', 'not great',
+                         'big deal', 'true', 'maybe', 'probably', 'sort of',
+                         'kind of', 'right', 'look', 'not surprising',
                          'pretty wild', 'think about it', 'sound familiar', 'it depends',
                          'truth is', 'i think', 'i mean', 'so basically', 'to be honest',
-                         'of note', 'this matters', 'critically', 'significantly',
-                         'this is key', 'worth highlighting'}
+                         'critically', 'significantly'}
             if lower in skip_words:
                 continue
         cleaned.append(s)
@@ -2109,7 +2160,11 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
         result = ultra_short_inject(result)
         result = rhetorical_inject(result)
     else:
+        # Academic mode: aggressively strip casual fillers + expand contractions
         result = _strip_casual_phrases(result)
+        result = _expand_contractions(result)
+        result = _strip_casual_phrases(result)  # double-pass for safety
+        # Never inject fragments or rhetorical questions in academic writing
     result = paragraph_vary(result)
     result = re.sub(r'  +', ' ', result)
     result = re.sub(r'\.\s*\.', '.', result)
@@ -2136,6 +2191,20 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     # New: Paragraph-level feedback retry
     result = feedback_retry(result, chunks, passes, model or LLM_MODEL, tone)
 
+    # Deduplicate repeated sentences
+    lines = result.split('.')
+    seen = set()
+    deduped = []
+    for line in lines:
+        stripped = line.strip().lower()
+        if stripped and stripped not in seen and len(stripped) > 3:
+            seen.add(stripped)
+            deduped.append(line.strip())
+        elif not stripped:
+            deduped.append(line.strip())
+    result = '.'.join(deduped).strip()
+    result = result.replace('..', '.')
+    
     # Restore protected blocks (code, tables, citations)
     for placeholder, original in protected_blocks:
         result = result.replace(placeholder, original)
@@ -2571,6 +2640,33 @@ def reorder_paragraphs(text, strategy="logical"):
     else:  # "logical" - keep original order but group by topic similarity
         return '\n\n'.join(paragraphs)
 
+
+
+def _expand_contractions(text):
+    """Expand contractions for academic writing (isn't -> is not, etc.)."""
+    contractions = {
+        "isn't": "is not", "aren't": "are not", "wasn't": "was not",
+        "weren't": "were not", "don't": "do not", "doesn't": "does not",
+        "didn't": "did not", "won't": "will not", "wouldn't": "would not",
+        "shouldn't": "should not", "couldn't": "could not",
+        "haven't": "have not", "hasn't": "has not", "hadn't": "had not",
+        "can't": "cannot", "mustn't": "must not",
+        "it's": "it is", "that's": "that is", "there's": "there is",
+        "here's": "here is", "what's": "what is", "who's": "who is",
+        "he's": "he is", "she's": "she is",
+        "i'm": "I am", "you're": "you are", "we're": "we are",
+        "they're": "they are", "i've": "I have", "you've": "you have",
+        "we've": "we have", "they've": "they have",
+        "i'll": "I will", "you'll": "you will", "we'll": "we will",
+        "they'll": "they will", "he'll": "he will", "she'll": "she will",
+        "i'd": "I would", "you'd": "you would", "we'd": "we would",
+        "they'd": "they would", "he'd": "he would", "she'd": "she would",
+        "let's": "let us", "who's": "whose",
+    }
+    for contraction, expansion in contractions.items():
+        text = re.sub(r'\b' + re.escape(contraction) + r'\b', expansion, text, flags=re.IGNORECASE)
+    return text
+
 HTML = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2671,6 +2767,11 @@ HTML = r"""<!DOCTYPE html>
   .theme-toggle { position: fixed; top: 12px; right: 12px; z-index: 100; background: #222; border: 1px solid #333; color: #888; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
   body.light-mode { background: #f5f5f5; color: #1a1a1a; }
   body.light-mode .sidebar { background: #fafafa; border-color: #e0e0e0; }
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
   body.light-mode textarea { background: #fff; border-color: #ddd; color: #1a1a1a; }
   body.light-mode .stat-card { background: #fff; border-color: #e0e0e0; }
   body.light-mode .toolbar { background: #fafafa; border-color: #e0e0e0; }
@@ -2836,7 +2937,22 @@ HTML = r"""<!DOCTYPE html>
     </div>
     <div class="tab-content" id="tab-output">
       <div class="panel-label">Output (Humanized)</div>
-      <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
+      
+    <div id="outputEmptyState" style="display:flex;align-items:center;justify-content:center;position:absolute;top:0;left:0;right:0;bottom:0;color:#555;flex-direction:column;gap:12px;pointer-events:none;z-index:1;">
+      <svg width="64" height="64" viewBox="0 0 64 64" fill="none" style="opacity:0.3;">
+        <rect x="8" y="12" width="48" height="40" rx="4" stroke="#555" stroke-width="2" fill="none"/>
+        <line x1="16" y1="22" x2="48" y2="22" stroke="#555" stroke-width="2"/>
+        <line x1="16" y1="30" x2="40" y2="30" stroke="#555" stroke-width="2"/>
+        <line x1="16" y1="38" x2="44" y2="38" stroke="#555" stroke-width="2"/>
+        <line x1="16" y1="46" x2="36" y2="46" stroke="#555" stroke-width="2"/>
+        <circle cx="52" cy="16" r="6" fill="#00cc88" fill-opacity="0.3" stroke="#00cc88" stroke-width="1.5"/>
+        <path d="M49 16 L51 18 L55 14" stroke="#00cc88" stroke-width="1.5" fill="none"/>
+      </svg>
+      <div style="font-family:Playfair Display,serif;font-size:16px;color:#666;">Paste AI text &amp; click Humanize</div>
+      <div style="font-size:11px;color:#444;">or drop a .docx / .txt file anywhere</div>
+    </div>
+
+        <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
     </div>
     <div class="tab-content dual" id="tab-both">
       <div class="panel">
@@ -2858,6 +2974,9 @@ HTML = r"""<!DOCTYPE html>
       <span>Unique: <b id="statUnique">0</b></span>
       <span>Level: <b id="statLevel">--</b></span>
     </div>
+    
+    <div id="toastContainer" style="position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;pointer-events:none;"></div>
+
     <div class="status" id="status">Ready | Score: <span id="liveScore" style="color:#666;">--</span></div>
     <div class="stats" id="stats"></div>
 
@@ -3114,6 +3233,15 @@ async function loadFromHistory(id) {
 async function humanize() {
   const input = document.getElementById('input').value.trim();
   if (!input) { alert('Paste some text first'); return; }
+  const wc = input.split(/\s+/).length;
+  if(wc > 5000) {
+    showToast('Text has '+wc+' words. Processing may take '+Math.round(wc/30)+' seconds. Consider splitting into smaller chunks.', 'warning');
+  }
+  // Show output textarea, hide empty state
+  var outputEl = document.getElementById('output');
+  var emptyState = document.getElementById('outputEmptyState');
+  if(outputEl) outputEl.style.display = 'block';
+  if(emptyState) emptyState.style.display = 'none';
 
   const passes = parseInt(document.getElementById('passes').value);
   const model = document.getElementById('model').value;
@@ -3206,6 +3334,8 @@ async function humanize() {
         if (prog.status === 'done') {
           done = true;
           progressFill.style.width = '100%';
+          var es1 = document.getElementById('outputEmptyState'); if(es1) es1.style.display='none'; output.style.display='block';
+          document.getElementById('outputEmptyState').style.display='none';
           output.value = prog.result || prog.partial;
           output.classList.remove('typewriter-cursor');
           var sp2 = document.getElementById('stepProgress');
@@ -3219,7 +3349,8 @@ async function humanize() {
           const outGrade = outScore.grade || 'N/A';
           const scoreColor = (g) => g && g.includes('HUMAN') ? '#00cc88' : g === 'MIXED' ? '#ffaa00' : '#ff4444';
 
-          status.innerHTML = 'Done in ' + (prog.time || '?') + 's';
+          showToast('Humanization complete!', 'success');
+    status.innerHTML = 'Done in ' + (prog.time || '?') + 's';
           document.getElementById('stats').innerHTML =
             '<div><div class="stat-value">' + (prog.input_words || 0) + '</div><div class="stat-label">Input Words</div></div>' +
             '<div><div class="stat-value">' + (prog.output_words || 0) + '</div><div class="stat-label">Output Words</div></div>' +
@@ -3661,6 +3792,24 @@ function updateWordCount() {
 }
 document.getElementById('input').addEventListener('input', updateWordCount);
 document.getElementById('output').addEventListener('input', updateWordCount);
+// Toast notification system
+function showToast(msg, type) {
+  type = type || 'info';
+  var colors = {success:'#00cc88', error:'#ff4444', warning:'#ffaa00', info:'#888'};
+  var icons = {success:'✓', error:'✗', warning:'⚠', info:'ℹ'};
+  var toast = document.createElement('div');
+  toast.style.cssText = 'background:#1a1a1a;border:1px solid '+colors[type]+';border-left:3px solid '+colors[type]+';color:#e0e0e0;padding:10px 16px;border-radius:6px;font-size:13px;animation:slideInRight 0.3s ease;pointer-events:auto;max-width:320px;';
+  toast.innerHTML = '<span style="color:'+colors[type]+';font-weight:700;margin-right:8px;">'+icons[type]+'</span>'+msg;
+  var container = document.getElementById('toastContainer');
+  if(!container) { container = document.createElement('div'); container.id = 'toastContainer'; container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px;'; document.body.appendChild(container); }
+  container.appendChild(toast);
+  setTimeout(function() {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s';
+    setTimeout(function() { if(toast.parentNode) toast.parentNode.removeChild(toast); }, 300);
+  }, 4000);
+}
+
 
 
 function runVariants() {
