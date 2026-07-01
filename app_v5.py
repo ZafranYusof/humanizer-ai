@@ -2768,6 +2768,20 @@ HTML = r"""<!DOCTYPE html>
   body.light-mode { background: #f5f5f5; color: #1a1a1a; }
   body.light-mode .sidebar { background: #fafafa; border-color: #e0e0e0; }
 
+details summary::-webkit-details-marker { color: #00cc88; }
+details summary::marker { color: #00cc88; }
+details[open] summary { color: #00cc88; margin-bottom: 4px; }
+details > div { border-left: 2px solid #1a1a1a; padding-left: 12px; margin-left: 4px; }
+
+/* Floating action bar for Humanize button */
+.humanize-bar {
+  position: sticky; top: 0; z-index: 50;
+  background: rgba(10,10,10,0.95); backdrop-filter: blur(8px);
+  border-bottom: 1px solid #1a1a1a; padding: 12px 0; margin-bottom: 16px;
+  display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+}
+
+
 @keyframes slideInRight {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
@@ -2856,41 +2870,67 @@ HTML = r"""<!DOCTYPE html>
     </div>
 
     <div class="toolbar">
-      <button class="btn-secondary" onclick="runPreview()">Preview (10%)</button>
-      <button class="btn-secondary" onclick="checkExternal()">ZeroGPT Check</button>
-      <button class="btn-secondary" onclick="checkGrammar()">Grammar</button>
-      <button class="btn-secondary" onclick="showReadability()">Readability</button>
-      <button class="btn-secondary" onclick="showSettings()">Settings</button>
-      <button class="btn-secondary" onclick="showBatchQueue()">Batch Queue</button>
-      <button class="btn-secondary" onclick="showApiManager()">API Keys</button>
-      <button class="btn-secondary" onclick="runVariants()">Variants</button>
-      <button class="btn-secondary" onclick="showToneSlider()">Tone</button>
-      <button class="btn-secondary" onclick="showStyleTrain()">Style Match</button>
-      <div class="export-btns">
+      <!-- Quick Tools Row -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+        <button class="btn-secondary" onclick="runPreview()" style="background:#1a3a2a;border-color:#2a5a3a;">Preview</button>
+        <button class="btn-secondary" onclick="checkGrammar()">Grammar</button>
+        <button class="btn-secondary" onclick="showReadability()">Readability</button>
+        <button class="btn-secondary" onclick="showStatsTab()">Stats</button>
+        <button class="btn-secondary" onclick="runVariants()">Variants</button>
+        <button class="btn-secondary" onclick="checkExternal()">ZeroGPT</button>
+      </div>
+
+      <!-- Export Row -->
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px;">
+        <span style="font-size:10px;color:#666;text-transform:uppercase;letter-spacing:1px;font-family:JetBrains Mono,monospace;">Export:</span>
         <button class="btn-secondary" onclick="downloadDocx()">DOCX</button>
         <button class="btn-secondary" onclick="downloadTxt()">TXT</button>
         <button class="btn-secondary" onclick="downloadMd()">MD</button>
+        <button class="btn-secondary" onclick="exportPDF()">PDF</button>
       </div>
-      <button class="btn-secondary" onclick="showStatsTab()">Stats</button>
-      <button class="btn-secondary" onclick="showCustomLists()">Word Lists</button>
-      <button class="btn-secondary" onclick="togglePanel('detectionScorePanel')">Detection Scores</button>
-      <button class="btn-secondary" onclick="togglePanel('plagiarismPanel')">Plagiarism</button>
-      <button class="btn-secondary" onclick="togglePanel('adversarialPanel')">Adversarial</button>
-      <button class="btn-secondary" onclick="togglePanel('encryptionPanel')">Encryption</button>
-      <button class="btn-secondary" onclick="startABTest()">A/B Test</button>
-      <button class="btn-secondary" onclick="showCustomPrompts()">Custom Prompt</button>
-      <button class="btn-secondary" onclick="togglePanel('contextPanel')">Context</button>
-      <button class="btn-secondary" onclick="togglePanel('modelStatusPanel')">Models</button>
-      <button class="btn-secondary" onclick="togglePanel('keywordPanel')">Keywords</button>
-      <button class="btn-secondary" onclick="togglePanel('intensityStrategyPanel')">Intensity</button>
-      <button class="btn-secondary" onclick="togglePanel('captionPanel')">Captions</button>
-      <button class="btn-secondary" onclick="exportPDF()">PDF</button>
-      <button class="btn-secondary" onclick="scanWatermarks()">Watermark Scan</button>
-      <button class="btn-secondary" onclick="removeWatermarks()">Remove WM</button>
+
+      <!-- Advanced Tools (collapsible) -->
+      <details style="margin-bottom:8px;">
+        <summary style="font-size:11px;color:#888;cursor:pointer;text-transform:uppercase;letter-spacing:1px;font-family:JetBrains Mono,monospace;padding:4px 0;">Advanced Tools</summary>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;">
+          <button class="btn-secondary" onclick="togglePanel('detectionScorePanel')">Detection</button>
+          <button class="btn-secondary" onclick="togglePanel('plagiarismPanel')">Plagiarism</button>
+          <button class="btn-secondary" onclick="togglePanel('adversarialPanel')">Adversarial</button>
+          <button class="btn-secondary" onclick="togglePanel('keywordPanel')">Keywords</button>
+          <button class="btn-secondary" onclick="startABTest()">A/B Test</button>
+          <button class="btn-secondary" onclick="showCustomPrompts()">Custom Prompt</button>
+          <button class="btn-secondary" onclick="togglePanel('contextPanel')">Context</button>
+          <button class="btn-secondary" onclick="togglePanel('modelStatusPanel')">Models</button>
+          <button class="btn-secondary" onclick="togglePanel('intensityStrategyPanel')">Intensity</button>
+          <button class="btn-secondary" onclick="showToneSlider()">Tone Slider</button>
+          <button class="btn-secondary" onclick="showStyleTrain()">Style Match</button>
+          <button class="btn-secondary" onclick="togglePanel('captionPanel')">Captions</button>
+        </div>
+      </details>
+
+      <!-- Security Tools (collapsible) -->
+      <details style="margin-bottom:8px;">
+        <summary style="font-size:11px;color:#888;cursor:pointer;text-transform:uppercase;letter-spacing:1px;font-family:JetBrains Mono,monospace;padding:4px 0;">Security & Privacy</summary>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 0;">
+          <button class="btn-secondary" onclick="togglePanel('encryptionPanel')">Encryption</button>
+          <button class="btn-secondary" onclick="scanWatermarks()">Watermark Scan</button>
+          <button class="btn-secondary" onclick="removeWatermarks()">Remove WM</button>
+          <button class="btn-secondary" onclick="showCustomLists()">Word Lists</button>
+        </div>
+      </details>
+
+      <!-- Settings Row -->
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+        <button class="btn-secondary" onclick="showSettings()">Settings</button>
+        <button class="btn-secondary" onclick="showBatchQueue()">Batch Queue</button>
+        <button class="btn-secondary" onclick="showApiManager()">API Keys</button>
+      </div>
     </div>
 
     <div class="controls">
-      <button class="btn-primary" id="humanizeBtn" onclick="humanize()">Humanize</button>
+      <!-- Sticky Action Bar -->
+      <div class="humanize-bar">
+        <button class="btn-primary" id="humanizeBtn" onclick="humanize()" style="padding:14px 32px;font-size:16px;letter-spacing:0.5px;">Humanize</button>
       <select id="passes">
         <option value="3">3 Passes (Best)</option>
         <option value="2">2 Passes (Faster)</option>
@@ -2919,9 +2959,11 @@ HTML = r"""<!DOCTYPE html>
         <option value="medical">Medical Domain</option>
         <option value="legal">Legal Domain</option>
       </select>
-      <button class="btn-secondary" onclick="copyOutput()">Copy Output</button>
-      <button class="btn-secondary" onclick="downloadDocx()">Download .docx</button>
-      <button class="btn-secondary" onclick="clearAll()">Clear</button>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <button class="btn-primary" onclick="copyOutput()" style="padding:8px 16px;font-size:12px;">Copy Output</button>
+        <button class="btn-secondary" onclick="downloadDocx()" style="padding:8px 12px;font-size:11px;">Download .docx</button>
+        <button class="btn-secondary" onclick="clearAll()" style="padding:8px 12px;font-size:11px;color:#ff6666;border-color:#ff6666;">Clear</button>
+      </div>
     </div>
 
     <div class="step-progress" id="stepProgress" style="display:none;"></div>
