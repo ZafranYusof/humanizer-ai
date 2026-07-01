@@ -3271,6 +3271,144 @@ HTML = r"""<!DOCTYPE html>
 
 <script>
 // Load history on page load
+function togglePanel(id) {
+  var el = document.getElementById(id);
+  if (!el) {
+    // Create panel dynamically if it doesn't exist
+    el = document.createElement('div');
+    el.id = id;
+    el.style.cssText = 'display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);';
+    el.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;"><h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">' + id.replace('Panel','').replace(/([A-Z])/g,' $1').trim() + '</h3><button class="btn btn-sm" onclick="document.getElementById(\''+id+'\').style.display=\'none\'">Close</button></div><div id="'+id+'_content">Loading...</div>';
+    document.body.appendChild(el);
+  }
+  el.style.display = el.style.display === 'none' || el.style.display === '' ? 'block' : 'none';
+}
+
+async function checkGrammar() {
+  var text = document.getElementById('input').value.trim();
+  if (!text) { showToast('Paste some text first', 'warn'); return; }
+  showToast('Checking grammar...', 'info');
+  try {
+    var resp = await fetch('/api/grammar-fix', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text})});
+    var data = await resp.json();
+    if (data.error) { showToast('Error: '+data.error, 'err'); return; }
+    var changes = data.changes || [];
+    if (changes.length === 0) {
+      showToast('No grammar issues found!', 'ok');
+    } else {
+      var html = '<div style="max-height:400px;overflow-y:auto;">';
+      changes.forEach(function(c) {
+        html += '<div style="padding:8px;margin-bottom:6px;border-left:3px solid var(--accent);background:var(--bg-secondary);">';
+        html += '<div style="font-size:12px;color:var(--text-muted);">'+escapeHtml(c.original||'')+'</div>';
+        html += '<div style="font-size:13px;color:var(--success);margin-top:4px;">'+escapeHtml(c.corrected||c.suggestion||'')+'</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+      togglePanel('grammarPanel');
+      var content = document.getElementById('grammarPanel_content');
+      if (content) content.innerHTML = html;
+      showToast(changes.length + ' grammar issues found', 'warn');
+    }
+  } catch(e) { showToast('Grammar check failed: '+e.message, 'err'); }
+}
+
+async function showReadability() {
+  var text = document.getElementById('output').value || document.getElementById('input').value;
+  if (!text.trim()) { showToast('No text to analyze', 'warn'); return; }
+  try {
+    var resp = await fetch('/api/readability', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text})});
+    var data = await resp.json();
+    if (data.error) { showToast('Error: '+data.error, 'err'); return; }
+    var html = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">';
+    html += '<div style="padding:12px;background:var(--bg-secondary);border:1px solid var(--border);"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Grade</div><div style="font-size:18px;font-weight:700;">'+(data.grade||'--')+'</div></div>';
+    html += '<div style="padding:12px;background:var(--bg-secondary);border:1px solid var(--border);"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Reading Ease</div><div style="font-size:18px;font-weight:700;">'+(data.reading_ease||'--')+'</div></div>';
+    html += '<div style="padding:12px;background:var(--bg-secondary);border:1px solid var(--border);"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Level</div><div style="font-size:18px;font-weight:700;">'+(data.level||'--')+'</div></div>';
+    html += '<div style="padding:12px;background:var(--bg-secondary);border:1px solid var(--border);"><div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;">Avg Sentence</div><div style="font-size:18px;font-weight:700;">'+(data.avg_sentence_length||'--')+' words</div></div>';
+    html += '</div>';
+    togglePanel('readabilityPanel');
+    var content = document.getElementById('readabilityPanel_content');
+    if (content) content.innerHTML = html;
+  } catch(e) { showToast('Readability check failed: '+e.message, 'err'); }
+}
+
+async function runDetectionScan() {
+  var text = document.getElementById('output').value || document.getElementById('input').value;
+  if (!text.trim()) { showToast('No text to scan', 'warn'); return; }
+  showToast('Running detection scan...', 'info');
+  try {
+    var resp = await fetch('/api/external-check', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text})});
+    var data = await resp.json();
+    if (data.error) { showToast('Error: '+data.error, 'err'); return; }
+    var score = data.ai_percentage || 0;
+    var color = score < 30 ? 'var(--success)' : score < 60 ? 'var(--warning)' : 'var(--error)';
+    var html = '<div style="text-align:center;padding:20px;">';
+    html += '<div style="font-size:48px;font-weight:700;color:'+color+';">'+score+'%</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">AI Detection Score</div>';
+    html += '<div style="margin-top:16px;font-size:13px;">'+(data.is_human ? 'Likely Human' : 'Likely AI')+'</div>';
+    html += '<div style="margin-top:8px;font-size:12px;color:var(--text-muted);">Sentences: '+(data.human_sentences||0)+' human, '+(data.ai_sentences||0)+' AI</div>';
+    html += '</div>';
+    togglePanel('detectionScanPanel');
+    var content = document.getElementById('detectionScanPanel_content');
+    if (content) content.innerHTML = html;
+    showToast('Detection scan complete', 'ok');
+  } catch(e) { showToast('Detection scan failed: '+e.message, 'err'); }
+}
+
+async function runPlagiarismCheck() {
+  var text = document.getElementById('output').value || document.getElementById('input').value;
+  if (!text.trim()) { showToast('No text to check', 'warn'); return; }
+  showToast('Checking plagiarism...', 'info');
+  try {
+    var resp = await fetch('/api/plagiarism', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text})});
+    var data = await resp.json();
+    if (data.error) { showToast('Error: '+data.error, 'err'); return; }
+    var score = data.score || 0;
+    var color = score < 20 ? 'var(--success)' : score < 50 ? 'var(--warning)' : 'var(--error)';
+    var html = '<div style="text-align:center;padding:20px;">';
+    html += '<div style="font-size:48px;font-weight:700;color:'+color+';">'+score+'%</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Plagiarism Score</div>';
+    if (data.sources && data.sources.length > 0) {
+      html += '<div style="margin-top:16px;text-align:left;">';
+      data.sources.forEach(function(s) {
+        html += '<div style="padding:8px;margin-bottom:4px;border-left:3px solid var(--border);font-size:12px;">'+escapeHtml(s.title||s.url||'Source')+'</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+    togglePanel('plagiarismResultPanel');
+    var content = document.getElementById('plagiarismResultPanel_content');
+    if (content) content.innerHTML = html;
+    showToast('Plagiarism check complete', 'ok');
+  } catch(e) { showToast('Plagiarism check failed: '+e.message, 'err'); }
+}
+
+function encryptText() {
+  var text = document.getElementById('output').value || document.getElementById('input').value;
+  var password = document.getElementById('encryptPassword').value;
+  if (!text || !password) { showToast('Need text and password', 'warn'); return; }
+  fetch('/api/encrypt', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text, password:password})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { showToast(d.error, 'err'); return; }
+      document.getElementById('encryptResult').innerHTML = '<div style="padding:12px;background:var(--bg-secondary);border:1px solid var(--border);word-break:break-all;font-family:IBM Plex Mono,monospace;font-size:11px;">'+escapeHtml(d.encrypted||'')+'</div>';
+      showToast('Text encrypted', 'ok');
+    })
+    .catch(function(e) { showToast('Encryption failed', 'err'); });
+}
+function decryptText() {
+  var encrypted = document.getElementById('encryptResult').textContent;
+  var password = document.getElementById('encryptPassword').value;
+  if (!encrypted || !password) { showToast('Need encrypted text and password', 'warn'); return; }
+  fetch('/api/decrypt', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({encrypted:encrypted, password:password})})
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.error) { showToast(d.error, 'err'); return; }
+      document.getElementById('output').value = d.text || '';
+      showToast('Text decrypted', 'ok');
+    })
+    .catch(function(e) { showToast('Decryption failed', 'err'); });
+}
+
 async function loadHistory() {
   try {
     const resp = await fetch('/api/history');
@@ -4253,7 +4391,126 @@ function exportPDF() {
     '.meta{font-size:11px;color:#666;margin-bottom:30px;font-family:monospace;}</style></head><body>' +
     '<h1>Humanized Text</h1>' +
     '<div class="meta">Generated: ' + new Date().toLocaleString() + ' | Words: ' + text.split(/\s+/).length + '</div>' +
-    '<div>' + text.replace(/\n/g, '<br>') + '</div></body></html>');
+    '<div>' + text.replace(/\n/g, '<br>') + '</div>
+<!-- Floating Panel Container -->
+<div id="grammarPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Grammar Check</h3>
+    <button class="btn btn-sm" onclick="this.closest('div[id$=Panel]').style.display='none'">Close</button>
+  </div>
+  <div id="grammarPanel_content">No issues checked yet.</div>
+</div>
+
+<div id="readabilityPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Readability</h3>
+    <button class="btn btn-sm" onclick="this.closest('div[id$=Panel]').style.display='none'">Close</button>
+  </div>
+  <div id="readabilityPanel_content">No text analyzed yet.</div>
+</div>
+
+<div id="detectionScanPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Detection Scores</h3>
+    <button class="btn btn-sm" onclick="this.closest('div[id$=Panel]').style.display='none'">Close</button>
+  </div>
+  <div id="detectionScanPanel_content">No scan run yet.</div>
+</div>
+
+<div id="plagiarismResultPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Plagiarism Check</h3>
+    <button class="btn btn-sm" onclick="this.closest('div[id$=Panel]').style.display='none'">Close</button>
+  </div>
+  <div id="plagiarismResultPanel_content">No check run yet.</div>
+</div>
+
+<div id="toneSliderPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:500px;width:90%;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Tone Slider</h3>
+    <button class="btn btn-sm" onclick="this.style.display='none'">Close</button>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-muted);">Formality: <span id="toneValue">0.5</span></label>
+    <input type="range" id="toneRange" min="0" max="1" step="0.1" value="0.5" style="width:100%;margin:8px 0;" oninput="document.getElementById('toneValue').textContent=this.value">
+    <button class="btn" onclick="applyToneSlider()" style="margin-top:8px;">Apply</button>
+  </div>
+</div>
+
+<div id="styleTrainPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:500px;width:90%;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Style Training</h3>
+    <button class="btn btn-sm" onclick="this.style.display='none'">Close</button>
+  </div>
+  <div>
+    <textarea id="styleSamples" placeholder="Paste your writing samples here (one per line)..." style="width:100%;height:120px;padding:12px;border:1px solid var(--border);font-family:Lora,serif;font-size:14px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+    <button class="btn" onclick="saveStyleSamples()" style="margin-top:8px;">Save Samples</button>
+  </div>
+</div>
+
+<div id="contextPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Context Memory</h3>
+    <button class="btn btn-sm" onclick="this.closest('div[id$=Panel]').style.display='none'">Close</button>
+  </div>
+  <div id="contextPanel_content">
+    <textarea id="contextInput" placeholder="Paste reference text for context..." style="width:100%;height:100px;padding:12px;border:1px solid var(--border);font-family:Lora,serif;font-size:14px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+    <button class="btn" onclick="saveToContext(document.getElementById('contextInput').value, 'Manual')" style="margin-top:8px;">Add to Context</button>
+    <div id="contextList" style="margin-top:12px;"></div>
+  </div>
+</div>
+
+<div id="intensityStrategyPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:500px;width:90%;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Intensity & Strategy</h3>
+    <button class="btn btn-sm" onclick="this.style.display='none'">Close</button>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--text-muted);">Intensity: <span id="intensityValue">0.5</span></label>
+    <input type="range" id="intensityRange" min="0" max="1" step="0.1" value="0.5" style="width:100%;margin:8px 0;" oninput="document.getElementById('intensityValue').textContent=this.value;updateIntensityLabel()">
+    <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+      <button class="btn" onclick="setStrategy('conservative')">Conservative</button>
+      <button class="btn" onclick="setStrategy('balanced')">Balanced</button>
+      <button class="btn" onclick="setStrategy('aggressive')">Aggressive</button>
+    </div>
+  </div>
+</div>
+
+<div id="encryptionPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:500px;width:90%;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Encryption</h3>
+    <button class="btn btn-sm" onclick="this.style.display='none'">Close</button>
+  </div>
+  <div>
+    <input type="password" id="encryptPassword" placeholder="Encryption password" style="width:100%;padding:10px;border:1px solid var(--border);font-family:IBM Plex Mono,monospace;font-size:13px;background:var(--bg);color:var(--text);">
+    <div style="display:flex;gap:8px;margin-top:12px;">
+      <button class="btn" onclick="encryptText()">Encrypt</button>
+      <button class="btn" onclick="decryptText()">Decrypt</button>
+    </div>
+    <div id="encryptResult" style="margin-top:12px;font-size:12px;"></div>
+  </div>
+</div>
+
+<div id="customPromptPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:500px;width:90%;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">Custom Prompt</h3>
+    <button class="btn btn-sm" onclick="this.closest('div[id$=Panel]').style.display='none'">Close</button>
+  </div>
+  <div>
+    <textarea id="customPromptText" placeholder="Write your custom system prompt..." style="width:100%;height:120px;padding:12px;border:1px solid var(--border);font-family:IBM Plex Mono,monospace;font-size:13px;background:var(--bg);color:var(--text);resize:vertical;"></textarea>
+    <button class="btn" onclick="saveCustomPrompt()" style="margin-top:8px;">Save Prompt</button>
+  </div>
+</div>
+
+<div id="abTestPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:700px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+    <h3 style="font-family:IBM Plex Mono,monospace;font-size:14px;text-transform:uppercase;letter-spacing:2px;">A/B Test</h3>
+    <button class="btn btn-sm" onclick="document.getElementById('abTestPanel').style.display='none'">Close</button>
+  </div>
+  <div id="abTestPanel_content">Running A/B test...</div>
+</div>
+
+</body></html>');
   doc.close();
   
   setTimeout(function() {
