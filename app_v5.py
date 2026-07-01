@@ -1749,6 +1749,46 @@ def _academic_ultra_short_inject(text):
 
 
 
+# ─── Feature #3: Real Detection API (ZeroGPT) ──────────────────────
+# Run output through ZeroGPT API as final verification.
+# If score high, return real score alongside internal score.
+
+
+def zerogpt_check(text):
+    """Check text against ZeroGPT API. Returns {score, source, error}."""
+    try:
+        # Truncate to 5000 chars (ZeroGPT limit)
+        check_text = text[:5000]
+        payload = json.dumps({"input_text": check_text}).encode()
+        req = urllib.request.Request(
+            "https://api.zerogpt.com/api/detect/detectText",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Origin": "https://www.zerogpt.com",
+                "Referer": "https://www.zerogpt.com/",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+
+        if data.get("success"):
+            d = data.get("data", {})
+            return {
+                "score": d.get("fakePercentage", 0),
+                "ai_sentences": d.get("aiSentences", 0),
+                "human_sentences": d.get("humanSentences", 0),
+                "source": "zerogpt",
+                "error": None,
+            }
+        else:
+            return {"score": None, "source": "zerogpt", "error": data.get("message", "API error")}
+    except Exception as e:
+        return {"score": None, "source": "zerogpt", "error": str(e)[:100]}
+
+
 # ─── Feature: Selective LLM Rewrite (Perplexity-Aware) ────────────
 # Score each sentence, rewrite ONLY high-AI ones via LLM.
 # Saves tokens, preserves natural voice, targets problem areas.
@@ -6229,6 +6269,16 @@ class Handler(BaseHTTPRequestHandler):
             elapsed = round(time.time() - t0, 1)
             output_score = calc_detection_score(result)
 
+            # #3 Real detection API — verify with ZeroGPT
+            zerogpt_result = None
+            if output_score['score'] > 20:  # Only check if internal score is non-trivial
+                print(f"[{job_id}] ZeroGPT verification...", flush=True)
+                zerogpt_result = zerogpt_check(result)
+                if zerogpt_result.get('score') is not None:
+                    print(f"[{job_id}] ZeroGPT: {zerogpt_result['score']}% AI (internal: {output_score['score']})", flush=True)
+                else:
+                    print(f"[{job_id}] ZeroGPT unavailable: {zerogpt_result.get('error', 'unknown')}", flush=True)
+
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Job {job_id} DONE: {input_words} -> {len(result.split())} words | Score: {JOBS[job_id]['input_score']['score']} -> {output_score['score']} ({elapsed}s)", flush=True)
 
             # Save to history
@@ -6276,6 +6326,7 @@ class Handler(BaseHTTPRequestHandler):
                     "time": elapsed,
                     "output_words": len(result.split()),
                     "output_score": output_score,
+                    "zerogpt": zerogpt_result,
                 })
 
             # Cache result for future identical requests
