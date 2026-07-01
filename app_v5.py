@@ -1749,6 +1749,72 @@ def _academic_ultra_short_inject(text):
 
 
 
+# ─── Feature: Selective LLM Rewrite (Perplexity-Aware) ────────────
+# Score each sentence, rewrite ONLY high-AI ones via LLM.
+# Saves tokens, preserves natural voice, targets problem areas.
+
+SELECTIVE_REWRITE_THRESHOLD = 30  # Sentences scoring above this get rewritten
+SELECTIVE_REWRITE_BATCH = 5       # Max sentences per LLM call
+
+
+def selective_llm_rewrite(text, model=None, tone="casual"):
+    """Score sentences individually, rewrite only high-AI ones via LLM."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 3:
+        return text
+
+    # Score all sentences
+    scored = []
+    for i, s in enumerate(sentences):
+        score = score_sentence_ai(s)
+        if score >= SELECTIVE_REWRITE_THRESHOLD and len(s.split()) >= 8:
+            scored.append((i, score, s))
+
+    if not scored:
+        return text  # All sentences look human, skip LLM call
+
+    # Sort by score descending, take top N
+    scored.sort(key=lambda x: -x[1])
+    to_rewrite = scored[:SELECTIVE_REWRITE_BATCH]
+
+    # Build LLM prompt with ONLY the problem sentences
+    numbered = []
+    for idx, (i, score, s) in enumerate(to_rewrite):
+        numbered.append(f"{idx+1}. {s}")
+
+    prompt = f"""Rewrite these sentences to sound natural and human-written. 
+Keep the same meaning but vary structure, use contractions, shorter words, 
+casual tone. Do NOT add extra info. Return ONLY the rewritten sentences, 
+numbered same way.
+
+{chr(10).join(numbered)}"""
+
+    system = "You are a human writer. Rewrite AI-sounding text to sound naturally human. Keep meaning intact. Use contractions and casual language."
+
+    if tone == "academic":
+        system = "You are an academic writer. Rewrite to sound like a natural human academic writer. Use hedging language (perhaps, arguably, it seems), vary sentence structure, avoid overly formal transitions. Keep scholarly tone but make it sound genuinely written by a researcher."
+
+    try:
+        result = llm_call(prompt, system=system, temperature=0.8, model=model)
+        if not result:
+            return text
+
+        # Parse numbered results
+        rewritten = re.split(r'\d+\.\s*', result.strip())
+        rewritten = [r.strip() for r in rewritten if r.strip()]
+
+        # Replace sentences
+        for idx, (i, score, original) in enumerate(to_rewrite):
+            if idx < len(rewritten) and rewritten[idx]:
+                sentences[i] = rewritten[idx]
+                print(f"  [selective] Rewrote sentence {i} (score {score}): {original[:60]}... → {rewritten[idx][:60]}...", flush=True)
+
+        return ' '.join(sentences)
+    except Exception as e:
+        print(f"  [selective] LLM rewrite failed: {e}", flush=True)
+        return text
+
+
 # ─── Processing Stats ───────────────────────────────────────────────
 STATS = {
     "total_jobs": 0,
@@ -6016,6 +6082,14 @@ class Handler(BaseHTTPRequestHandler):
             result = re.sub(r'\b(\w+)\s+\1\b', r'\1', result, flags=re.I)  # "and and" → "and"
             result = re.sub(r'\.\.+', '.', result)
             result = re.sub(r',\s*,', ',', result)
+
+            # #1 Selective LLM rewrite — target only high-AI sentences
+            pre_selective_score = calc_detection_score(result)
+            if pre_selective_score['score'] > 25:
+                print(f"[{job_id}] Selective rewrite: score {pre_selective_score['score']} > 25, targeting problem sentences...", flush=True)
+                result = selective_llm_rewrite(result, model=model, tone=tone)
+                post_selective_score = calc_detection_score(result)
+                print(f"[{job_id}] Selective rewrite: {pre_selective_score['score']} → {post_selective_score['score']}", flush=True)
 
             # Auto-retry worst chunks
             if AUTO_RETRY:
