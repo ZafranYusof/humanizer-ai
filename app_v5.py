@@ -2480,9 +2480,22 @@ def check_output_quality(original, result):
 
 
 def humanize_chunk(chunk, passes, model, tone="casual"):
-    """Humanize a single chunk with quality gate and model fallback."""
+    """Humanize a single chunk with quality gate and model fallback.
+    #5: Pre-score sentences — skip LLM if chunk already human-like."""
     locked_chunk, placeholders = _lock_citations(chunk)
     locked_chunk = apply_custom_preserve(locked_chunk)
+
+    # #5 Sentence-level pre-check — skip LLM if chunk already human-like
+    sentences = re.split(r'(?<=[.!?])\s+', locked_chunk)
+    if len(sentences) >= 3:
+        ai_scores = [score_sentence_ai(s) for s in sentences if len(s.split()) >= 5]
+        if ai_scores:
+            avg_score = sum(ai_scores) / len(ai_scores)
+            high_ai_count = sum(1 for s in ai_scores if s >= 30)
+            # If avg score < 15 and < 20% sentences are high-AI, skip LLM
+            if avg_score < 15 and high_ai_count / max(len(ai_scores), 1) < 0.20:
+                print(f"  [surgical] Chunk already human-like (avg={avg_score:.0f}, high_ai={high_ai_count}/{len(ai_scores)}), skipping LLM", flush=True)
+                return _unlock_citations(locked_chunk, placeholders)
     
     models_to_try = [model] if model else [LLM_MODEL]
     for fb in MODEL_FALLBACK_CHAIN:
