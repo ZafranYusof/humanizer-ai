@@ -248,11 +248,12 @@ def pass1_rewrite(text, model=None, tone="casual"):
     max_words = int(word_count * 1.15)
 
     if tone == "academic":
-        system = """You are rewriting text for an academic thesis/report. Maintain FORMAL academic tone throughout.
+        system = f"""You are rewriting text for an academic thesis/report. Maintain FORMAL academic tone throughout.
 
 ABSOLUTE CRITICAL RULE — LENGTH:
-Keep the output approximately the same length as the input. DO NOT summarize. DO NOT compress. DO NOT shorten. DO NOT remove any sentences.
+Your output MUST be between {min_words} and {max_words} words (input is {word_count} words). DO NOT summarize. DO NOT compress. DO NOT shorten. DO NOT remove any sentences.
 Every single idea in the input must appear in the output. If you skip an idea, you fail.
+If your output is shorter than {min_words} words, ADD more detail, examples, or elaboration to reach the target.
 
 Style rules:
 1. Vary sentence length: mix medium (12-18 words) with longer analytical sentences (25-40 words). Avoid very short fragments.
@@ -271,24 +272,33 @@ NEVER: use "delve", "leverage", "utilize", "facilitate", "comprehensive", "robus
 
 Output ONLY the rewritten text. No explanations, no notes, no meta-commentary."""
     else:
-        system = """You are rewriting text to sound human-written, NOT AI-generated. This is your ONLY job.
+        system = f"""You are rewriting text to sound like a REAL HUMAN wrote it — not AI. This is your ONLY job.
 
 ABSOLUTE CRITICAL RULE — LENGTH:
-Keep the output approximately the same length as the input. DO NOT summarize. DO NOT compress. DO NOT shorten. DO NOT remove any sentences.
+Your output MUST be between {min_words} and {max_words} words (input is {word_count} words). DO NOT summarize. DO NOT compress. DO NOT shorten. DO NOT remove any sentences.
 Every single idea in the input must appear in the output. If you skip an idea, you fail.
+If your output is shorter than {min_words} words, ADD more detail, examples, opinions, or elaboration to reach the target.
 
-Style rules:
-1. Vary sentence length: mix short (8-12 words) with longer ones (20-35 words). Avoid fragments under 5 words — they sound robotic, not human.
-2. Use contractions: don't, isn't, it's, we're, they've, won't, can't, I'm.
-3. NEVER inject filler phrases ("honestly", "basically", "you know", "I think"). NEVER output standalone fragments ("True." "Right." "Huge." "Simple as that." "Kind of."). Every sentence must be 8+ words and convey real information.
-4. Replace formal transitions: "Furthermore"→"Also", "However"→"But", "Therefore"→"So", "Moreover"→"Plus".
-5. Keep ALL facts, data, names, numbers, and key information intact.
-6. Keep the same language as the original.
-7. NEVER modify, remove, or reformat any text inside [KEEP:...] brackets — copy them exactly as-is.
-8. Write like a real person explaining to a friend
+HOW TO SOUND HUMAN:
+1. Write like a tired college student explaining something to a friend at 2am. Messy, opinionated, real.
+2. Vary sentence length DRAMATICALLY: mix very short (3-6 words) with medium (12-18) with long rambling ones (25-40). Never uniform.
+3. Use contractions everywhere: don't, isn't, it's, we're, they've, won't, can't, I'm, that's, there's.
+4. Include 1-2 sentence fragments per paragraph: "Not bad." "True." "Weird." "Or not." "Better yet."
+5. Include 1 self-correction per 200 words: "Well, actually..." "Hmm wait." "Let me rephrase." "That came out wrong."
+6. Mix formal and informal in the SAME paragraph. Start casual, then drop a formal phrase, then go casual again.
+7. Ask rhetorical questions: "Does that even make sense?" "Why bother?" "See what I mean?"
+8. Use first person: "I think", "I found", "In my experience", "I've noticed"
+9. Add opinion/hedging: "Honestly?", "Seems like", "Personally I'd go with", "I'm not convinced that"
+10. Use specific numbers instead of vague quantifiers: "37 researchers" not "many researchers", "in 2021" not "recently"
 
-NEVER: summarize, compress, remove details, add new information, use "delve", "leverage", "utilize", "facilitate", "comprehensive", "robust", "streamline", "landscape", "tapestry", "pivotal", "crucial".
-NEVER: output single-word sentences ("True." "Right." "OK." "Honestly." "Basically."). NEVER repeat the same idea in different words. Each sentence must convey NEW information.
+CRITICAL ANTI-AI RULES:
+- NEVER use: "Furthermore", "Moreover", "In addition", "Consequently", "It is important to note", "It is worth noting"
+- NEVER write uniform sentence lengths. Variation is everything.
+- NEVER stay in one register. Mix it up.
+- NEVER use these AI words: delve, leverage, utilize, facilitate, comprehensive, robust, streamline, landscape, tapestry, pivotal, crucial
+- Keep ALL facts, data, names, numbers, and key information intact.
+- Keep the same language as the original.
+- NEVER modify, remove, or reformat any text inside [KEEP:...] brackets — copy them exactly as-is.
 
 Output ONLY the rewritten text. No explanations, no notes, no meta-commentary."""
 
@@ -300,9 +310,10 @@ Output ONLY the rewritten text. No explanations, no notes, no meta-commentary.""
 def pass2_burstiness(text, model=None, tone="casual"):
     """Inject sentence length variation and imperfections while keeping length."""
     word_count = len(text.split())
+    min_words = int(word_count * 0.9)
 
     if tone == "academic":
-        system = """You are editing academic text to improve readability while maintaining formal tone. Keep the text approximately the same length as the input.
+        system = f"""You are editing academic text to improve readability while maintaining formal tone. Your output MUST be at least {min_words} words (input is {word_count} words). Do NOT shorten the text.
 
 Make these specific changes:
 1. Find the LONGEST sentence and split it into two shorter ones — both must remain formal.
@@ -314,7 +325,7 @@ Make these specific changes:
 
 Keep all facts, citations, and references intact. Output ONLY the edited text."""
     else:
-        system = """You are editing text to make it sound more human. Keep the text approximately the same length as the input.
+        system = f"""You are editing text to make it sound more human. Your output MUST be at least {min_words} words (input is {word_count} words). Do NOT shorten the text.
 
 Make these specific changes:
 1. Find the LONGEST sentence and split it into two shorter ones.
@@ -334,9 +345,10 @@ Keep all facts intact. Output ONLY the edited text."""
 def pass3_polish(text, model=None, tone="casual"):
     """Final pass: remove AI tells, add personality."""
     word_count = len(text.split())
+    min_words = int(word_count * 0.9)
 
     if tone == "academic":
-        system = """You are a final editor for academic text. Clean up remaining AI patterns while maintaining formal tone. Keep the text approximately the same length as the input.
+        system = f"""You are a final editor for academic text. Clean up remaining AI patterns while maintaining formal tone. Your output MUST be at least {min_words} words (input is {word_count} words). Do NOT shorten the text.
 
 Scan for and fix:
 - Any remaining AI words: "delve", "dive into", "explore", "landscape", "tapestry", "crucial", "pivotal", "leverage", "utilize", "facilitate", "comprehensive", "robust", "streamline", "underscore", "multifaceted", "holistic", "paradigm". Replace with simple academic alternatives.
@@ -349,7 +361,7 @@ DO NOT add personal touches like "in my view" or "from my experience" — mainta
 
 Output ONLY the final polished text. No notes or explanations."""
     else:
-        system = """You are a final editor. Clean up remaining AI patterns. Keep the text approximately the same length as the input.
+        system = f"""You are a final editor. Clean up remaining AI patterns. Your output MUST be at least {min_words} words (input is {word_count} words). Do NOT shorten the text.
 
 Scan for and fix:
 - Any "it is" → "it's", "do not" → "don't", "cannot" → "can't", etc.
@@ -967,6 +979,98 @@ def pronoun_escalation(text):
         result.append(sc)
     return ' '.join(result)
 
+
+
+# --- #3: Personal Anecdote Injection ---
+ANECDOTE_TEMPLATES = [
+    "I remember when {topic}. Totally changed how I think about it.",
+    "A friend of mine tried {topic} and the results were... mixed.",
+    "Last week I ran into someone who {topic}. Made me rethink things.",
+    "I've seen {topic} play out differently in real life than in theory.",
+    "Had a conversation about {topic} the other day. Surprisingly nuanced.",
+    "Back in college, a professor once said {topic}. Stuck with me ever since.",
+    "I was skeptical about {topic} at first, but the data convinced me.",
+    "My take on {topic}? It depends on who you ask, honestly.",
+    "I've gone back and forth on {topic} more times than I'd like to admit.",
+    "The first time I encountered {topic}, I got it completely wrong.",
+    "I used to think {topic} was straightforward. It's not.",
+]
+ANECDOTE_TOPICS = [
+    "this kind of problem", "that approach", "this whole area",
+    "similar situations", "the underlying theory", "how people handle this",
+    "the practical side of things", "this exact scenario",
+    "the tradeoffs involved", "what the research actually shows",
+]
+
+def anecdote_inject(text, tone="casual"):
+    """Inject 1-2 first-person micro-stories per 500 words."""
+    if tone == "academic":
+        return text
+    random.seed(hash(text) % 2**32 + 203)
+    word_count = len(text.split())
+    if word_count < 100:
+        return text
+    max_anecdotes = max(1, word_count // 400)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 5:
+        return text
+    result = []
+    injected = 0
+    for i, s in enumerate(sentences):
+        result.append(s)
+        if (injected < max_anecdotes and i > len(sentences) * 0.3
+                and i < len(sentences) * 0.8
+                and len(s.split()) > 8 and random.random() < 0.12):
+            template = random.choice(ANECDOTE_TEMPLATES)
+            topic = random.choice(ANECDOTE_TOPICS)
+            result.append(template.format(topic=topic))
+            injected += 1
+    return ' '.join(result)
+
+
+# --- #5: Opinion/Stance Injection ---
+OPINION_STARTERS = [
+    "Honestly, I think ", "Personally, I'd argue ", "My take? ",
+    "I'm not convinced that ", "If you ask me, ", "I'd say ",
+    "The way I see it, ", "I'm leaning towards ",
+    "Fair warning, I might be wrong, but ", "Controversial opinion: ",
+]
+OPINION_MID = [
+    ", if you ask me", ", personally", ", but I could be wrong",
+    ", though not everyone agrees", ", at least from where I stand",
+    ", but take that with a grain of salt",
+]
+
+def opinion_inject(text, tone="casual"):
+    """Inject weak opinions and stance-taking."""
+    if tone == "academic":
+        return text
+    random.seed(hash(text) % 2**32 + 205)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 6:
+        return text
+    result = []
+    injected = 0
+    max_inject = max(1, len(sentences) // 12)
+    for i, s in enumerate(sentences):
+        sc = s.strip()
+        wc = len(sc.split())
+        if (injected < max_inject and wc > 10 and wc < 30
+                and not sc.startswith(('I ', 'My ', 'We ', 'Honestly', 'Personally'))
+                and random.random() < 0.08):
+            starter = random.choice(OPINION_STARTERS)
+            sc = starter + sc[0].lower() + sc[1:] if sc else sc
+            injected += 1
+        elif (injected < max_inject and wc > 12 and random.random() < 0.05):
+            hedge = random.choice(OPINION_MID)
+            words = sc.split()
+            mid = len(words) // 2
+            sc = ' '.join(words[:mid]) + hedge + ' ' + ' '.join(words[mid:])
+            injected += 1
+        result.append(sc)
+    return ' '.join(result)
+
+
 def syntactic_variation(text):
     """#3: Vary sentence structures — questions, exclamations, parenthetical asides, inversions."""
     random.seed(hash(text) % 2**32 + 99)
@@ -1094,6 +1198,59 @@ def perplexity_word_sub(text):
             new_words.append(w)
     return ' '.join(new_words)
 
+
+
+# --- #1: N-gram Pattern Breaker ---
+AI_NGRAMS = {
+    "in addition": ["on top of that", "also", "plus", "and"],
+    "furthermore": ["what's more", "also", "beyond that", "and"],
+    "moreover": ["on top of that", "plus", "also", "besides"],
+    "however": ["but", "that said", "still", "yet", "then again"],
+    "nevertheless": ["even so", "still", "that said", "but"],
+    "nonetheless": ["even so", "still", "that said", "but"],
+    "consequently": ["so", "as a result", "which means", "and so"],
+    "subsequently": ["after that", "later", "then", "next"],
+    "additionally": ["also", "plus", "on top of that", "and"],
+    "particularly": ["especially", "notably", "mainly", "really"],
+    "essentially": ["basically", "really", "at its core", "fundamentally"],
+    "effectively": ["basically", "in practice", "really", "pretty much"],
+    "arguably": ["maybe", "probably", "you could say", "likely"],
+    "ultimately": ["at the end of the day", "in the end", "finally"],
+    "predominantly": ["mostly", "mainly", "largely", "chiefly"],
+    "undeniably": ["clearly", "no question", "obviously", "definitely"],
+    "in order to": ["to", "so as to"],
+    "due to the fact": ["because", "since", "as"],
+    "it is important": ["you should know", "worth noting"],
+    "it is worth noting": ["worth mentioning", "keep in mind"],
+    "on the other hand": ["but then again", "conversely", "flip side"],
+    "as a result of": ["because of", "from", "thanks to"],
+    "in the event that": ["if", "should", "when"],
+    "with regard to": ["about", "for", "on", "regarding"],
+    "with respect to": ["about", "for", "on", "regarding"],
+    "the vast majority": ["most", "almost all", "nearly all"],
+    "plays a crucial role": ["matters a lot", "is key", "is vital"],
+    "it should be noted": ["worth mentioning", "keep in mind"],
+    "it is important to note": ["heads up:", "worth noting:"],
+    "at the end of the day": ["ultimately,", "really,", "honestly,"],
+    "plays an important role in": ["matters for", "is key to", "helps drive"],
+    "take into consideration": ["consider", "think about", "keep in mind"],
+}
+
+def ngram_breaker(text):
+    """Replace predictable AI multi-word phrases with less expected alternatives."""
+    random.seed(hash(text) % 2**32 + 201)
+    sorted_phrases = sorted(AI_NGRAMS.keys(), key=len, reverse=True)
+    for phrase in sorted_phrases:
+        pattern = re.compile(r'\b' + re.escape(phrase) + r'\b', re.IGNORECASE)
+        def _repl(m, alts=AI_NGRAMS[phrase]):
+            choice = random.choice(alts)
+            if m.group(0)[0].isupper():
+                choice = choice[0].upper() + choice[1:] if choice else choice
+            return choice
+        text = pattern.sub(_repl, text)
+    return text
+
+
 def synonym_rotate(text):
     """Rotate ~10% of matching words with synonyms."""
     random.seed(hash(text) % 2**32 + 44)
@@ -1218,6 +1375,35 @@ def sentence_length_chaos(text):
         i += 1
 
     return ' '.join(result)
+
+
+
+# --- #4: Asymmetric Sentence Pairing ---
+PUNCHY_FOLLOWS = [
+    "Big deal.", "Not ideal.", "True.", "Fair point.", "Huge.",
+    "Not great.", "Simple as that.", "Think about it.", "Wild.",
+    "Obviously.", "That's it.", "Period.", "No question.", "Right?",
+    "Makes sense.", "Not easy.", "Fair enough.", "There you go.",
+]
+
+def asymmetric_pairing(text):
+    """After a long sentence (20+ words), inject a short punchy one."""
+    random.seed(hash(text) % 2**32 + 204)
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 5:
+        return text
+    result = []
+    injected = 0
+    max_inject = max(1, len(sentences) // 10)
+    for i, s in enumerate(sentences):
+        result.append(s)
+        wc = len(s.split())
+        if (injected < max_inject and wc >= 20
+                and i < len(sentences) - 1 and random.random() < 0.20):
+            result.append(random.choice(PUNCHY_FOLLOWS))
+            injected += 1
+    return ' '.join(result)
+
 
 def sentence_starter_diversity(text):
     """Detect repetitive sentence starters and inject variety."""
@@ -1919,43 +2105,1055 @@ def _burstiness_inject_academic(text):
     
     return ' '.join(result)
 
+
+# ─── Anti-Detection: Advanced Features ────────────────────────────────
+
+_TYPO_CORRECTIONS = [
+    (r'\bthat that\b', 'that'),
+    (r'\bthe the\b', 'the'),
+    (r'\bto to\b', 'to'),
+    (r'\ba a\b', 'a'),
+]
+
+_COMMA_SPLICE_PAIRS = [
+    ("However,", "But"),
+    ("Therefore,", "So"),
+    ("Nevertheless,", "But"),
+    ("Consequently,", "So"),
+    ("Additionally,", "And"),
+    ("Moreover,", "And"),
+    ("Furthermore,", "And"),
+    ("Nonetheless,", "But"),
+]
+
+_MISSING_ARTICLES = [
+    (r'\b(in|at|on|with|for|from)\s+(system|process|method|approach|framework|model|data|result|analysis)\b',
+     lambda m: f'{m.group(1)} the {m.group(2)}'),
+]
+
+def typo_inject(text, tone="casual"):
+    """Inject minor imperfections: comma splices, missing articles, near-miss typos.
+    AI is grammatically perfect — detectors flag this."""
+    if tone == "academic":
+        # Academic: lighter touch — only comma splices
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        for i, sent in enumerate(sentences):
+            if random.random() < 0.06 and ', ' in sent:
+                parts = sent.split(', ', 1)
+                if len(parts) == 2 and len(parts[0].split()) > 3:
+                    sentences[i] = parts[0] + ' ' + parts[1].lstrip()
+        return ' '.join(sentences)
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    for i, sent in enumerate(sentences):
+        r = random.random()
+        if r < 0.08 and ', ' in sent:
+            # Comma splice: remove comma joining two independent clauses
+            parts = sent.split(', ', 1)
+            if len(parts) == 2 and len(parts[0].split()) > 3:
+                sentences[i] = parts[0] + ' ' + parts[1].lstrip()
+        elif r < 0.12:
+            # Missing article (drop "the" before common nouns)
+            modified = re.sub(r'\bthe\s+(system|process|method|approach|framework|model|data|result|analysis|study|research|work|paper|report)\b',
+                            r'\1', sent, count=1)
+            if modified != sent:
+                sentences[i] = modified
+        elif r < 0.14:
+            # Their/there near-miss (typed fast)
+            if 'their' in sent.lower() and random.random() < 0.3:
+                sent = re.sub(r'\btheir\b', 'there', sent, count=1)
+                sentences[i] = sent
+    return ' '.join(sentences)
+
+
+_FRAGMENT_STARTERS = [
+    "Not bad.", "Better yet.", "True.", "Or not.", "Weird.",
+    "Fair enough.", "No kidding.", "Go figure.", "Right?",
+    "Anyway.", "Still.", "Obviously.", "Surprisingly.",
+    "Ironically.", "Sadly.", "Thankfully.", "Honestly.",
+    "Admittedly.", "Frankly.", "Naturally.", "Apparently.",
+    "Arguably.", "Curiously.", "Oddly.", "Strangely.",
+    "Anyway,", "So,", "Now,", "Well,", "Thing is,",
+    "Point is,", "Funny thing,", "Here's the thing.",
+    "Make sense?", "See what I mean?", "You know?",
+    "Believe it or not.", "Not gonna lie.", "No joke.",
+]
+
+def fragment_inject(text):
+    """Add sentence fragments that break uniform sentence structure.
+    AI writes complete sentences. Fragments = human signal."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 3:
+        return text
+
+    result = []
+    for i, sent in enumerate(sentences):
+        result.append(sent)
+        # 10% chance after non-fragment sentences
+        if (random.random() < 0.10 and len(sent.split()) > 6
+                and i < len(sentences) - 1):
+            frag = random.choice(_FRAGMENT_STARTERS)
+            result.append(frag)
+
+    return ' '.join(result)
+
+
+_SELF_CORRECTIONS = [
+    "Well, actually, let me rephrase that.",
+    "Hmm, that's not quite what I meant.",
+    "Wait, let me back up a bit.",
+    "Actually, scratch that.",
+    "Let me think about this differently.",
+    "On second thought,",
+    "I'm not sure that's the right word, but",
+    "If I'm being honest,",
+    "Looking back at this,",
+    "I think I'm overcomplicating this.",
+    "Let me put it another way.",
+    "That came out wrong. What I mean is,",
+    "Bear with me here,",
+    "I know this sounds weird, but",
+    "Maybe I should clarify.",
+]
+
+def self_correction_inject(text):
+    """Inject self-corrections and thinking-process markers.
+    Zero AI models naturally self-correct mid-text."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 4:
+        return text
+
+    inject_count = 0
+    max_inject = max(1, len(sentences) // 8)
+
+    result = []
+    for i, sent in enumerate(sentences):
+        result.append(sent)
+        if (inject_count < max_inject and random.random() < 0.06
+                and 2 < i < len(sentences) - 2 and len(sent.split()) > 5):
+            correction = random.choice(_SELF_CORRECTIONS)
+            # Some corrections are prefixes, some are full sentences
+            if correction.endswith(('.', '!', '?')):
+                result.append(correction)
+            else:
+                # Merge with next sentence as prefix
+                if i + 1 < len(sentences):
+                    sentences[i + 1] = correction + ' ' + sentences[i + 1].lower()
+            inject_count += 1
+
+    return ' '.join(result)
+
+
+_FORMAL_PHRASES = [
+    "it is worth noting that", "one might argue that",
+    "the evidence suggests", "it bears mentioning that",
+    "the data indicates", "upon closer examination",
+    "in light of these findings", "the literature supports",
+    "it becomes apparent that", "the implications are clear",
+]
+
+_INFORMAL_PHRASES = [
+    "honestly", "look,", "thing is,", "pretty much",
+    "kind of", "sort of", "a bit", "at the end of the day",
+    "let's be real", "no cap", "lowkey", "deadass",
+    "if you think about it", "basically",
+]
+
+def register_mixing(text, tone="casual"):
+    """Mix formal and informal register within same paragraph.
+    AI stays consistent register per section — detectors measure this."""
+    paragraphs = re.split(r'\n\n+', text)
+
+    for i, para in enumerate(paragraphs):
+        sentences = re.split(r'(?<=[.!?])\s+', para)
+        if len(sentences) < 3:
+            continue
+
+        # 20% chance per paragraph to inject register mix
+        if random.random() > 0.20:
+            continue
+
+        # Pick 1 sentence to make informal (if paragraph is formal)
+        # or formal (if paragraph is informal)
+        target_idx = random.randint(0, len(sentences) - 1)
+        sent = sentences[target_idx]
+
+        if tone == "casual":
+            # Inject formal phrase
+            phrase = random.choice(_FORMAL_PHRASES)
+            if random.random() < 0.5:
+                sentences[target_idx] = f"{phrase.capitalize()} {sent[0].lower()}{sent[1:]}" if len(sent) > 1 else sent
+        else:
+            # Inject informal phrase
+            phrase = random.choice(_INFORMAL_PHRASES)
+            if random.random() < 0.5:
+                sentences[target_idx] = f"{phrase} {sent[0].lower()}{sent[1:]}" if len(sent) > 1 else sent
+
+        paragraphs[i] = ' '.join(sentences)
+
+    return '\n\n'.join(paragraphs)
+
+
+_QUOTE_TEMPLATES = [
+    '"{text}," as someone once put it.',
+    '"{text}," a colleague mentioned to me recently.',
+    '"{text}," I remember reading somewhere.',
+    '"{text}," or so the argument goes.',
+    '"{text}," which reminds me of what a professor once said.',
+    'Someone once told me, "{text}."',
+    'I came across this idea: "{text}."',
+    'There\'s a saying — "{text}."',
+    '"{text}," and I tend to agree.',
+    '"{text}," though I\'m paraphrasing here.',
+]
+
+def quotation_inject(text):
+    """Inject attributed speech with unnamed people.
+    AI rarely attributes speech — unique statistical fingerprint."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 4:
+        return text
+
+    inject_count = 0
+    max_inject = max(1, len(sentences) // 10)
+
+    result = []
+    for i, sent in enumerate(sentences):
+        if (inject_count < max_inject and random.random() < 0.04
+                and len(sent.split()) > 6 and len(sent.split()) < 25
+                and 1 < i < len(sentences) - 2):
+            # Wrap sentence in a quote template
+            template = random.choice(_QUOTE_TEMPLATES)
+            # Trim sentence to core idea
+            core = sent.rstrip('.!?')
+            if len(core.split()) > 4:
+                quoted = template.format(text=core)
+                result.append(quoted)
+                inject_count += 1
+            else:
+                result.append(sent)
+        else:
+            result.append(sent)
+
+    return ' '.join(result)
+
+
+_VAGUE_TO_SPECIFIC = [
+    (r'\bmany researchers\b', lambda: f'{random.randint(12,87)} researchers'),
+    (r'\bseveral studies\b', lambda: f'{random.randint(3,15)} studies'),
+    (r'\bnumerous studies\b', lambda: f'{random.randint(20,150)} studies'),
+    (r'\bsome evidence\b', lambda: f'evidence from {random.randint(2,8)} trials'),
+    (r'\brecent research\b', lambda: f'research from {random.choice([2019,2020,2021,2022,2023,2024,2025])}'),
+    (r'\brecently\b', lambda: f'in {random.choice([2019,2020,2021,2022,2023,2024,2025])}'),
+    (r'\boften\b', lambda: f'in roughly {random.randint(60,85)}% of cases'),
+    (r'\bfrequently\b', lambda: f'about {random.randint(3,7)} times out of 10'),
+    (r'\ba significant number of\b', lambda: f'around {random.randint(40,75)}% of'),
+    (r'\ba large proportion\b', lambda: f'nearly {random.randint(65,90)}% of'),
+    (r'\bin many cases\b', lambda: f'in about {random.randint(60,80)}% of cases'),
+    (r'\bfor a long time\b', lambda: f'for over {random.randint(10,30)} years'),
+    (r'\bmany experts\b', lambda: f'{random.randint(30,100)} experts'),
+    (r'\bvarious factors\b', lambda: f'{random.randint(4,12)} key factors'),
+]
+
+def specificity_inject(text):
+    """Replace vague quantifiers with specific numbers.
+    AI uses vague quantifiers — specific numbers = human recall signal."""
+    for pattern, replacement_fn in _VAGUE_TO_SPECIFIC:
+        def make_replacement(m):
+            return replacement_fn()
+        text = re.sub(pattern, make_replacement, text, count=1)
+    return text
+
+
+# ─── Anti-Detection: Long-Text Features ──────────────────────────────
+
+# #3: Per-sentence perplexity scorer
+_ZIPF_RARE = {
+    'albeit', 'notwithstanding', 'paradoxically', 'juxtapose', 'nuanced',
+    'dichotomy', 'pragmatic', 'empirical', 'pedagogy', 'hegemony',
+    'discourse', 'paradigm', 'catalyst', 'ramification', 'inherent',
+    'ubiquitous', 'ephemeral', 'tangential', 'idiosyncratic', 'arbitrary',
+    'proliferate', 'mitigate', 'exacerbate', 'corroborate', 'elucidate',
+    'precipitate', 'oscillate', 'fluctuate', 'perpetuate', 'consolidate',
+    'disseminate', 'juxtaposition', 'conundrum', 'dichotomy', 'nuance',
+    'vicinity', 'trajectory', 'caveat', 'impetus', 'cognizant',
+    'predicament', 'scrutiny', 'anomaly', 'cohort', 'resilience',
+    'intricate', 'substantive', 'tentative', 'preliminary', 'marginal',
+    'empirically', 'theoretically', 'methodologically', 'predominantly',
+    'incremental', 'systematic', 'exponential', 'correlation', 'regression',
+    'longitudinal', 'cross-sectional', 'qualitative', 'quantitative',
+}
+
+def perplexity_score_sentence(sent):
+    """Score sentence perplexity based on vocabulary rarity. Higher = more human-like."""
+    words = sent.lower().split()
+    if not words:
+        return 0
+    rare_count = sum(1 for w in words if w.strip('.,!?;:') in _ZIPF_RARE)
+    # Also check word length diversity
+    lengths = [len(w) for w in words if len(w) > 1]
+    if not lengths:
+        return 0
+    import statistics
+    cv = statistics.stdev(lengths) / max(statistics.mean(lengths), 1) if len(lengths) > 1 else 0
+    # Score = rarity + length diversity
+    return (rare_count / max(len(words), 1)) * 100 + cv * 20
+
+def rewrite_low_perplexity(text, tone="casual"):
+    """Rewrite only sentences with low perplexity (too simple/common)."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    rewritten = 0
+    for i, sent in enumerate(sentences):
+        if len(sent.split()) < 6:
+            continue
+        score = perplexity_score_sentence(sent)
+        if score < 15:  # Too simple
+            # Inject 1-2 rare-but-natural words
+            words = sent.split()
+            if len(words) > 8:
+                # Replace a common word with a rare synonym
+                replacements = {
+                    'important': 'substantive', 'shows': 'demonstrates',
+                    'helps': 'facilitates', 'big': 'substantial',
+                    'use': 'utilize', 'make': 'render',
+                    'think': 'postulate', 'find': 'ascertain',
+                    'change': 'metamorphose', 'start': 'precipitate',
+                    'end': 'culminate', 'grow': 'proliferate',
+                    'reduce': 'mitigate', 'worsen': 'exacerbate',
+                    'explain': 'elucidate', 'prove': 'corroborate',
+                    'mix': 'juxtapose', 'spread': 'disseminate',
+                }
+                for old, new in replacements.items():
+                    pattern = r'\b' + old + r'\b'
+                    if re.search(pattern, sent, re.I):
+                        sentences[i] = re.sub(pattern, new, sent, count=1, flags=re.I)
+                        rewritten += 1
+                        break
+    if rewritten:
+        print(f"[perplexity] Rewrote {rewritten} low-perplexity sentences", flush=True)
+    return ' '.join(sentences)
+
+
+# #4: Syntax tree diversity
+def detect_syntax_pattern(sent):
+    """Detect dominant sentence pattern. Returns pattern name."""
+    s = sent.strip()
+    words = s.split()
+    if len(words) < 3:
+        return 'fragment'
+
+    # Passive: "is/was/were/been + past participle"
+    if re.search(r'\b(is|are|was|were|been|being)\s+\w+ed\b', s, re.I):
+        return 'passive'
+    # Fronted adverbial: starts with adverb/conjunct
+    if re.search(r'^(However|Moreover|Furthermore|Additionally|Consequently|Meanwhile|Subsequently|Nevertheless|Nonetheless|Interestingly|Surprisingly|Notably|Importantly|Significantly)\b', s, re.I):
+        return 'fronted_adverbial'
+    # Question
+    if s.endswith('?'):
+        return 'question'
+    # Starts with "I" or "We"
+    if re.search(r'^(I|We|My|Our)\b', s):
+        return 'first_person'
+    # Starts with "The" or "This" or "These"
+    if re.search(r'^(The|This|These|That|Those)\b', s):
+        return 'determiner_start'
+    # Starts with gerund (-ing)
+    if re.search(r'^[A-Z]\w+ing\b', s):
+        return 'gerund_start'
+    # Cleft: "It is/was ... that/who"
+    if re.search(r'^It\s+(is|was)\b.*\b(that|who)\b', s, re.I):
+        return 'cleft'
+    return 'simple_svo'
+
+def enforce_syntax_diversity(text, tone="casual"):
+    """Track syntax patterns. Log dominant pattern for awareness.
+    Only applies safe transforms (remove fronted adverbials)."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 5:
+        return text
+
+    patterns = [detect_syntax_pattern(s) for s in sentences]
+    from collections import Counter
+    counts = Counter(patterns)
+    total = len(patterns)
+
+    for pattern, count in counts.most_common(1):
+        if count / total > 0.40:
+            print(f"[syntax] {pattern}={count}/{total} ({count/total:.0%})", flush=True)
+            # Only safe transform: remove fronted adverbials
+            if pattern == 'fronted_adverbial':
+                for i, (sent, pat) in enumerate(zip(sentences, patterns)):
+                    if pat == 'fronted_adverbial':
+                        sentences[i] = re.sub(r'^(However|Moreover|Furthermore|Additionally|Consequently),\s*', '', sent)
+            break
+
+    return ' '.join(sentences)
+
+def _rewrite_to_different_structure(sent, target):
+    """Quick structural rewrite without LLM."""
+    if target == 'passive':
+        # "X does Y" → "Y is done by X" (simplified)
+        words = sent.split()
+        if len(words) > 5:
+            # Move object to front, add "is" + past participle
+            mid = len(words) // 2
+            return f"What gets {words[-1].rstrip('.').lower()} is {' '.join(words[:mid]).lower()}."
+    elif target == 'first_person':
+        return f"I noticed that {sent[0].lower()}{sent[1:]}"
+    elif target == 'active':
+        # Remove "is/was + ed" pattern
+        sent = re.sub(r'\b(is|are|was|were)\s+(\w+ed)\b', lambda m: m.group(2).replace('ed', 's'), sent)
+    return sent
+
+
+# #5: Progressive tone shift
+def progressive_tone_shift(text, tone="casual"):
+    """Shift from formal at start to casual at end. Humans get tired as they write."""
+    if tone == "academic":
+        return text  # Don't shift academic text
+
+    paragraphs = re.split(r'\n\n+', text)
+    if len(paragraphs) < 3:
+        return text
+
+    total = len(paragraphs)
+    result = []
+    for i, para in enumerate(paragraphs):
+        position = i / max(total - 1, 1)  # 0.0 = start, 1.0 = end
+        if position < 0.3:
+            # First 30%: slightly formal (no change)
+            result.append(para)
+        elif position < 0.6:
+            # Middle 40%: mix
+            if random.random() < 0.3:
+                para = _make_more_casual(para)
+            result.append(para)
+        else:
+            # Last 30%: casual
+            para = _make_more_casual(para)
+            result.append(para)
+
+    return '\n\n'.join(result)
+
+def _make_more_casual(text):
+    """Make text slightly more casual."""
+    casual_swaps = {
+        r'\bHowever,': 'But',
+        r'\bTherefore,': 'So',
+        r'\bNevertheless,': 'Still,',
+        r'\bConsequently,': 'So',
+        r'\bFurthermore,': 'Plus,',
+        r'\bMoreover,': 'And',
+        r'\bIn addition,': 'Also,',
+        r'\bsubsequently': 'later',
+        r'\bapproximately': 'about',
+        r'\butilize': 'use',
+        r'\bfacilitate': 'help',
+        r'\bdemonstrate': 'show',
+        r'\bcommence': 'start',
+        r'\bterminate': 'end',
+        r'\bregarding': 'about',
+        r'\bnecessitate': 'need',
+    }
+    for pattern, replacement in casual_swaps.items():
+        text = re.sub(pattern, replacement, text, count=1)
+    return text
+
+
+# #1: Style zone randomization
+_STYLE_ZONES = [
+    {"name": "casual", "instructions": "casual, contractions, fragments OK"},
+    {"name": "formal", "instructions": "slightly formal, complete sentences"},
+    {"name": "story", "instructions": "anecdotal, first-person, personal experience"},
+    {"name": "analytical", "instructions": "data-focused, specific numbers, evidence-based"},
+    {"name": "opinionated", "instructions": "strong opinions, hedging, 'I think', 'seems like'"},
+]
+
+def style_zone_randomize(text, tone="casual"):
+    """Split into zones, apply different style transforms to each.
+    Breaks uniform style signal that detectors measure."""
+    if tone == "academic":
+        return text  # Don't randomize academic
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 8:
+        return text
+
+    # Group sentences into zones of ~4-6 sentences
+    zone_size = random.randint(4, 6)
+    zones = []
+    for i in range(0, len(sentences), zone_size):
+        zone = sentences[i:i+zone_size]
+        zones.append(zone)
+
+    result = []
+    for zi, zone in enumerate(zones):
+        zone_style = random.choice(_STYLE_ZONES)
+        zone_text = ' '.join(zone)
+
+        if zone_style["name"] == "casual":
+            zone_text = _make_more_casual(zone_text)
+        elif zone_style["name"] == "story":
+            # Add first-person framing if not present
+            if not re.search(r'\b(I|my|me)\b', zone_text, re.I):
+                starters = ["I remember ", "I've seen ", "In my experience, ", "I noticed "]
+                zone_text = random.choice(starters) + zone_text[0].lower() + zone_text[1:]
+        elif zone_style["name"] == "opinionated":
+            if not re.search(r'\b(I think|seems|honestly|personally)\b', zone_text, re.I):
+                zone_text = "Honestly, " + zone_text[0].lower() + zone_text[1:]
+        elif zone_style["name"] == "analytical":
+            # Already handled by specificity_inject
+            pass
+
+        result.append(zone_text)
+
+    return ' '.join(result)
+
+
+# #2: Human corpus injection
+_HUMAN_PARAGRAPHS = [
+    "I was reading about this the other day and honestly, the more I dig into it the less certain I become about this topic. There are so many variables at play.",
+    "My friend brought this up over coffee last week and we ended up arguing about it for like an hour. Neither of us could really convince the other.",
+    "Reminds me of something I came across in a blog post recently. The author made a pretty compelling case but I'm still not entirely sold on the idea.",
+    "This is one of those topics where I keep going back and forth. One day I'm convinced one way, the next day I'm not so sure anymore.",
+    "I remember discussing this in class a while back. The professor had some interesting points but I think there's more to it than what was covered.",
+    "Been thinking about this for a while now. There's something about the way the data is presented that doesn't quite sit right with me.",
+    "A colleague mentioned this to me the other day and it got me thinking. We don't really talk about this enough in the context we should.",
+    "I came across a thread on Reddit about this exact topic. Some of the comments were surprisingly well-informed, others not so much.",
+    "This reminds me of a documentary I watched last month. They covered a similar angle and the interviews were pretty eye-opening.",
+    "I've been meaning to look into this more deeply. From what I've gathered so far, the picture is a lot more complicated than most people assume.",
+    "There was this article I bookmarked a few months ago that really changed how I think about this stuff. Wish I could find it again.",
+    "My take on this has evolved over the past year or so. I used to think it was straightforward but now I realize there are layers to it.",
+    "Someone on Twitter posted about this and the replies were a mess. People have really strong opinions about this topic for some reason.",
+    "I had a similar conversation with my roommate just last night. We both agreed on the basics but disagreed on pretty much everything else.",
+    "This is the kind of thing that sounds simple on the surface but gets really messy once you start peeling back the layers.",
+    "I stumbled on this topic while doing research for something completely unrelated. Ended up spending two hours reading about it instead.",
+    "Honestly, I think we overcomplicate this sometimes. The core issue is pretty straightforward even if the details get fuzzy.",
+    "My professor once said something that stuck with me about this. She said the answer usually depends on who's asking and why.",
+    "I'm not an expert on this by any means but from what I can tell, the conventional wisdom might be missing something important.",
+    "This topic came up in a podcast I listen to regularly. The host had a guest who specialized in this area and their discussion was fascinating.",
+    "I think the biggest misconception people have about this is that there's one right answer. Reality is way messier than that.",
+    "Last semester we had a group project on a related topic. It was eye-opening how different our perspectives were on the same data.",
+    "I've noticed a pattern in how people talk about this online. Everyone's very confident until you ask them to explain the mechanism.",
+    "There's a book I read recently that covers this from a different angle. Totally recommend it if you want to challenge your assumptions.",
+    "I keep coming back to this question because I don't think we've really solved it yet. We've just gotten better at describing the problem.",
+    "My cousin works in a related field and she always tells me that theory and practice are two very different things when it comes to this.",
+    "I tried explaining this to my parents the other day and realized I didn't understand it as well as I thought. Teaching is hard.",
+    "The more data I look at the more I think we're asking the wrong questions. The framing matters as much as the analysis.",
+    "I saw a presentation on this at a conference last year. The speaker was brilliant but half the audience seemed lost.",
+    "What bugs me about the public discourse on this topic is how polarized it's become. There's very little room for nuance anymore.",
+    "I've been following the research on this for a few years now and I'm cautiously optimistic about where it's heading.",
+    "There was a study published recently that challenged a lot of what we thought we knew. Science is wild like that.",
+    "I think the key insight most people miss is that context matters enormously here. What works in one setting fails in another.",
+    "My experience with this has been a mixed bag honestly. Some of it works as advertised, some of it doesn't at all.",
+    "I used to be really skeptical about this whole area but the evidence has gradually won me over. Still have doubts though.",
+    "A friend of mine who's way smarter than me explained it this way and it finally clicked. Sometimes you just need the right analogy.",
+    "This is one of those rabbit holes I go down every few months. Each time I learn something new that changes my perspective.",
+    "I think the debate around this misses the forest for the trees. We get so caught up in details that we lose sight of the big picture.",
+    "Had an interesting experience with this at work recently. Theory said one thing, reality said another. Reality won.",
+    "I read a counterargument to this position that was really well-argued. Made me reconsider some of my assumptions.",
+    "There's a tendency in this field to overstate certainty. The honest answer is we don't know as much as we pretend to.",
+    "I think what makes this particularly tricky is that the variables interact in non-obvious ways. Linear thinking doesn't work here.",
+    "My gut feeling on this hasn't changed much but I'm trying to be more evidence-based about it. Easier said than done.",
+    "This reminds me of the parable about the blind men and the elephant. Everyone's touching a different part and claiming they understand the whole.",
+    "I've come to think that the most important factor here is the one nobody's really talking about. Timing.",
+    "There was a really good Twitter thread breaking this down last week. Wish I'd saved it because it explained things better than I can.",
+    "I think the reason this is so confusing is that different studies are measuring different things and calling them the same name.",
+    "My take is probably controversial but I think the mainstream view on this is at least partially wrong. Happy to be proven wrong though.",
+    "I spent last weekend reading papers on this topic and I'm more confused now than when I started. Progress, I guess?",
+    "Something that doesn't get mentioned enough is how cultural context shapes all of this. What's true here might not be true elsewhere.",
+]
+
+def inject_human_corpus(text, ratio=0.25):
+    """Inject real human paragraphs into the text. Ratio = fraction of human paragraphs."""
+    paragraphs = re.split(r'\n\n+', text)
+    if len(paragraphs) < 3:
+        # For single-block text, split by sentences into pseudo-paragraphs
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        if len(sentences) < 6:
+            return text
+        # Group into 3-4 sentence paragraphs
+        paragraphs = []
+        for i in range(0, len(sentences), 4):
+            paragraphs.append(' '.join(sentences[i:i+4]))
+
+    # How many human paragraphs to inject
+    num_inject = max(1, int(len(paragraphs) * ratio))
+    # Pick random positions (not first or last)
+    available_positions = list(range(1, len(paragraphs) - 1))
+    random.shuffle(available_positions)
+    inject_positions = sorted(available_positions[:num_inject])
+
+    # Pick random human paragraphs
+    human_samples = random.sample(_HUMAN_PARAGRAPHS, min(num_inject, len(_HUMAN_PARAGRAPHS)))
+
+    # Insert
+    for i, pos in enumerate(inject_positions):
+        if i < len(human_samples):
+            paragraphs.insert(pos + i, human_samples[i])
+
+    print(f"[corpus] Injected {len(human_samples)} human paragraphs at positions {inject_positions}", flush=True)
+    return '\n\n'.join(paragraphs)
+
+
+# #8: Citation/reference density
+_CITATION_AUTHORS = [
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+    "Davis", "Rodriguez", "Martinez", "Chen", "Wang", "Kim", "Park",
+    "Ahmed", "Ali", "Hassan", "Ibrahim", "Rahman", "Hussain",
+    "Kumar", "Singh", "Patel", "Sharma", "Gupta",
+    "Tanaka", "Sato", "Suzuki", "Watanabe",
+    "Abdullah", "Ismail", "Yusof", "Omar",
+]
+
+def citation_inject(text, tone="casual"):
+    """Add inline citations at human-like density (~1 per 150 words for academic)."""
+    if tone != "academic":
+        # For casual: add occasional personal references instead of formal citations
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        word_count = len(text.split())
+        target_cites = max(1, word_count // 300)  # 1 per 300 words for casual
+        injected = 0
+        result = []
+        for i, sent in enumerate(sentences):
+            result.append(sent)
+            if (injected < target_cites and len(sent.split()) > 8
+                    and random.random() < 0.08 and i > 0 and i < len(sentences) - 1):
+                cite_type = random.choice(['blog', 'podcast', 'article', 'conversation', 'thread'])
+                if cite_type == 'blog':
+                    result.append(f"I read about this in a blog post recently.")
+                elif cite_type == 'podcast':
+                    result.append(f"A podcast I listen to covered this exact topic.")
+                elif cite_type == 'article':
+                    result.append(f"There was an article on this that stuck with me.")
+                elif cite_type == 'conversation':
+                    result.append(f"I had a conversation about this just the other day.")
+                elif cite_type == 'thread':
+                    result.append(f"Saw a discussion about this online recently.")
+                injected += 1
+        return ' '.join(result)
+
+    # Academic: add formal citations
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    word_count = len(text.split())
+    target_cites = max(1, word_count // 150)
+    injected = 0
+    result = []
+    for i, sent in enumerate(sentences):
+        result.append(sent)
+        if (injected < target_cites and len(sent.split()) > 8
+                and random.random() < 0.12 and i > 0 and i < len(sentences) - 1):
+            # Add citation
+            author = random.choice(_CITATION_AUTHORS)
+            year = random.randint(2019, 2025)
+            if random.random() < 0.5:
+                cite = f"({author}, {year})"
+            else:
+                author2 = random.choice(_CITATION_AUTHORS)
+                cite = f"({author} & {author2}, {year})"
+            # Insert citation at end of sentence
+            if result[-1].endswith('.'):
+                result[-1] = result[-1][:-1] + f" {cite}."
+            injected += 1
+    return ' '.join(result)
+
+
+# ─── #10: Adversarial Paraphrasing ───────────────────────────────────
+
+def adversarial_paraphrase(text, tone="casual"):
+    """Iterative paraphrasing with perplexity optimization.
+    Rewrite sentences with LOW perplexity (too common) to increase rarity."""
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    improved = 0
+
+    for i, sent in enumerate(sentences):
+        if len(sent.split()) < 8:
+            continue
+
+        # Score perplexity
+        p_score = perplexity_score_sentence(sent)
+        if p_score > 20:  # Already rare enough
+            continue
+
+        # Find the most common/expected word and swap it
+        words = sent.split()
+        common_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
+                       'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+                       'could', 'should', 'may', 'might', 'can', 'shall', 'must',
+                       'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them'}
+
+        for j, w in enumerate(words):
+            clean = w.lower().strip('.,!?;:')
+            if clean in common_words:
+                continue  # Skip function words
+            if len(clean) < 5:
+                continue
+
+            # Try synonym replacement with rarer word
+            rare_swaps = {
+                'important': 'substantive', 'significant': 'salient',
+                'shows': 'elucidates', 'helps': 'facilitates',
+                'big': 'considerable', 'use': 'leverage',
+                'make': 'engender', 'think': 'postulate',
+                'find': 'ascertain', 'change': 'metamorphose',
+                'start': 'precipitate', 'end': 'culminate',
+                'grow': 'proliferate', 'reduce': 'mitigate',
+                'worsen': 'exacerbate', 'explain': 'elucidate',
+                'prove': 'corroborate', 'mix': 'juxtapose',
+                'spread': 'disseminate', 'begin': 'inaugurate',
+                'keep': 'preserve', 'give': 'bestow',
+                'take': 'procure', 'show': 'manifest',
+                'need': 'necessitate', 'want': 'desire',
+                'get': 'procure', 'put': 'place',
+                'set': 'establish', 'run': 'execute',
+                'move': 'traverse', 'turn': 'rotate',
+                'look': 'scrutinize', 'feel': 'perceive',
+                'seem': 'appear', 'tell': 'inform',
+                'ask': 'inquire', 'work': 'function',
+                'play': 'engage', 'hold': 'contain',
+                'stand': 'endure', 'lead': 'spearhead',
+                'follow': 'ensue', 'try': 'endeavor',
+                'break': 'fracture', 'fix': 'remedy',
+            }
+            if clean in rare_swaps:
+                replacement = rare_swaps[clean]
+                # Preserve original casing
+                if w[0].isupper():
+                    replacement = replacement.capitalize()
+                words[j] = w.replace(clean, replacement)
+                improved += 1
+                break  # One swap per sentence
+
+        sentences[i] = ' '.join(words)
+
+    if improved:
+        print(f"[adversarial] Swapped {improved} common words with rare synonyms", flush=True)
+    return ' '.join(sentences)
+
+
+# ─── #11: Style Transfer + Noise Injection ───────────────────────────
+
+def style_noise_inject(text, tone="casual"):
+    """Inject gaussian noise into sentence structure.
+    Breaks perfect grammar patterns that detectors flag."""
+    if tone == "academic":
+        return text  # Don't inject noise into academic text
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 4:
+        return text
+
+    for i, sent in enumerate(sentences):
+        if random.random() > 0.15:  # 15% chance per sentence
+            continue
+        if len(sent.split()) < 6:
+            continue
+
+        noise_type = random.choice(['contraction_swap', 'word_order', 'redundancy', 'filler'])
+
+        if noise_type == 'contraction_swap':
+            # Expand a contraction or contract an expansion
+            if "'" in sent:
+                sent = sent.replace("don't", "do not").replace("isn't", "is not")
+            else:
+                sent = sent.replace(" do not ", " don't ").replace(" is not ", " isn't ")
+
+        elif noise_type == 'word_order':
+            # Move a prepositional phrase to the start
+            words = sent.split()
+            if len(words) > 10:
+                # Find "in/on/at/during/after/before + phrase"
+                for j in range(len(words) - 2):
+                    if words[j].lower() in ('in', 'on', 'at', 'during', 'after', 'before', 'through'):
+                        # Move this phrase to start
+                        phrase = ' '.join(words[j:j+3])
+                        remaining = ' '.join(words[:j] + words[j+3:])
+                        sent = f"{phrase}, {remaining[0].lower()}{remaining[1:]}"
+                        break
+
+        elif noise_type == 'redundancy':
+            # Add a redundant clarification (humans do this)
+            clarifications = [
+                " that is,", " meaning,", " essentially,", " which is to say,",
+                " in other words,", " put simply,",
+            ]
+            words = sent.split()
+            if len(words) > 10:
+                mid = len(words) // 2
+                clar = random.choice(clarifications)
+                words.insert(mid, clar.rstrip(','))
+                sent = ' '.join(words)
+
+        elif noise_type == 'filler':
+            # Add a parenthetical aside
+            asides = [
+                "(at least I think so)", "(if I remember correctly)",
+                "(don't quote me on that)", "(roughly speaking)",
+                "(more or less)", "(from what I can tell)",
+            ]
+            words = sent.split()
+            if len(words) > 8:
+                pos = random.randint(3, len(words) - 2)
+                aside = random.choice(asides)
+                words.insert(pos, aside)
+                sent = ' '.join(words)
+
+        sentences[i] = sent
+
+    return ' '.join(sentences)
+
+
+# ─── #12: Statistical Mimicry ────────────────────────────────────────
+
+def statistical_mimicry(text, tone="casual"):
+    """Match human text statistics: sentence length distribution, word frequency, paragraph variance.
+    Human text follows log-normal sentence length distribution with high variance."""
+    import statistics as stats
+
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) < 5:
+        return text
+
+    # Current stats
+    lengths = [len(s.split()) for s in sentences]
+    current_mean = stats.mean(lengths)
+    current_stdev = stats.stdev(lengths) if len(lengths) > 1 else 0
+    current_cv = current_stdev / max(current_mean, 1)
+
+    # Human target: CV should be 0.5-0.8 (high variation)
+    target_cv = 0.65
+    if current_cv > 0.45:
+        return text  # Already has good variation
+
+    # Need more variation — split long sentences, combine short ones
+    result = []
+    i = 0
+    while i < len(sentences):
+        words = sentences[i].split()
+        word_len = len(words)
+
+        # If sentence is very long (>25 words), split it
+        if word_len > 25 and random.random() < 0.5:
+            mid = word_len // 2
+            # Find natural break point (comma, conjunction)
+            for j in range(max(0, mid-4), min(word_len, mid+4)):
+                if words[j] in (',', 'and', 'but', 'or', 'while', 'because', 'although'):
+                    part1 = ' '.join(words[:j+1])
+                    part2 = ' '.join(words[j+1:])
+                    if part2 and not part2[0].isupper():
+                        part2 = part2[0].upper() + part2[1:]
+                    result.append(part1)
+                    result.append(part2)
+                    break
+            else:
+                result.append(sentences[i])
+        # If sentence is very short (<6 words) and next is also short, combine
+        elif word_len < 6 and i + 1 < len(sentences) and len(sentences[i+1].split()) < 8:
+            combined = sentences[i].rstrip('.!?') + ', ' + sentences[i+1].lstrip()
+            if not combined.endswith(('.', '!', '?')):
+                combined += '.'
+            result.append(combined)
+            i += 2
+            continue
+        else:
+            result.append(sentences[i])
+        i += 1
+
+    return ' '.join(result)
+
+
+# ─── #13: Multi-Model Ensemble (Improved) ────────────────────────────
+
+def multi_model_ensemble_rewrite(text, models=None, tone="casual"):
+    """Split text into paragraphs, rewrite each with a DIFFERENT model.
+    Each model has a unique 'fingerprint' — mixing them breaks consistency detection."""
+    if models is None:
+        models = ["gc/gemini-2.5-flash", "ag/gemini-3-flash", "gc/gemini-2.5-pro"]
+
+    paragraphs = re.split(r'\n\n+', text)
+    if len(paragraphs) < 2:
+        # Single block — split by sentences into pseudo-paragraphs
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        paragraphs = []
+        for i in range(0, len(sentences), 5):
+            paragraphs.append(' '.join(sentences[i:i+5]))
+
+    if len(paragraphs) < 2:
+        return text
+
+    result = []
+    for i, para in enumerate(paragraphs):
+        if len(para.split()) < 15:
+            result.append(para)
+            continue
+
+        model = models[i % len(models)]
+        try:
+            rewritten = pass1_rewrite(para, model=model, tone=tone)
+            if rewritten and rewritten.strip() and len(rewritten.split()) > len(para.split()) * 0.5:
+                result.append(rewritten)
+            else:
+                result.append(para)
+        except Exception as e:
+            print(f"[ensemble] Para {i+1} failed with {model}: {e}", flush=True)
+            result.append(para)
+
+    return '\n\n'.join(result)
+
+
+def detector_evasion(text, tone="casual"):
+    """Target specific ZeroGPT detection signals:
+    1. Uniform sentence length → force high burstiness
+    2. Low vocabulary diversity → swap synonyms
+    3. No first-person → ensure pronouns present
+    4. Perfect grammar → inject micro-imperfections
+    5. Consistent paragraph length → vary paragraph sizes
+    6. High avg word length → use shorter synonyms
+    """
+    # Signal 1: Force sentence length variation
+    sentences = re.split(r'(?<=[.!?])\s+', text)
+    if len(sentences) > 4:
+        lengths = [len(s.split()) for s in sentences]
+        avg = sum(lengths) / len(lengths)
+        # If sentences are too uniform (all within 5 words of avg), force variation
+        uniform_count = sum(1 for l in lengths if abs(l - avg) < 5)
+        if uniform_count / len(lengths) > 0.6:
+            # Force split some long sentences, combine some short ones
+            result = []
+            i = 0
+            while i < len(sentences):
+                words = sentences[i].split()
+                if len(words) > 20 and random.random() < 0.4:
+                    # Split at midpoint
+                    mid = len(words) // 2
+                    # Find nearest comma or conjunction near midpoint
+                    for j in range(max(0, mid-5), min(len(words), mid+5)):
+                        if words[j] in (',', 'and', 'but', 'or', 'while', 'although'):
+                            part1 = ' '.join(words[:j+1])
+                            part2 = ' '.join(words[j+1:])
+                            if part2 and not part2[0].isupper():
+                                part2 = part2[0].upper() + part2[1:]
+                            result.append(part1)
+                            result.append(part2)
+                            break
+                    else:
+                        result.append(sentences[i])
+                elif len(words) < 6 and i + 1 < len(sentences) and len(sentences[i+1].split()) < 8:
+                    # Combine two short sentences
+                    combined = sentences[i].rstrip('.!?') + ', ' + sentences[i+1].lstrip()
+                    result.append(combined)
+                    i += 2
+                    continue
+                else:
+                    result.append(sentences[i])
+                i += 1
+            text = ' '.join(result)
+
+    # Signal 2: Reduce average word length (AI uses longer words)
+    if tone != "academic":
+        long_word_replacements = {
+            'utilize': 'use', 'facilitate': 'help', 'demonstrate': 'show',
+            'implement': 'set up', 'communicate': 'talk', 'sufficient': 'enough',
+            'accomplish': 'do', 'acquire': 'get', 'initiate': 'start',
+            'terminate': 'end', 'approximately': 'about', 'subsequently': 'then',
+            'additionally': 'also', 'consequently': 'so', 'previously': 'before',
+            'fundamentally': 'basically', 'significantly': 'a lot',
+            'predominantly': 'mostly', 'substantial': 'big', 'optimal': 'best',
+            'endeavor': 'try', 'subsequent': 'next', 'prior': 'before',
+            'regarding': 'about', 'concerning': 'about', 'necessitate': 'need',
+        }
+        for old, new in long_word_replacements.items():
+            text = re.sub(r'\b' + old + r'\b', new, text, flags=re.I)
+
+    # Signal 3: Ensure first-person pronouns present (1+ per 200 words)
+    word_count = len(text.split())
+    pronoun_count = len(re.findall(r'\b(I|my|me|I\'ve|I\'m|I\'d|I\'ll)\b', text, re.I))
+    needed = max(1, word_count // 200) - pronoun_count
+    if needed > 0 and tone != "academic":
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        for i, sent in enumerate(sentences):
+            if needed <= 0:
+                break
+            if len(sent.split()) > 8 and not re.search(r'\b(I|my|me)\b', sent, re.I):
+                starters = ["I think ", "I found that ", "In my view, ", "I've noticed "]
+                sentences[i] = random.choice(starters) + sent[0].lower() + sent[1:]
+                needed -= 1
+        text = ' '.join(sentences)
+
+    # Signal 4: Ensure contractions present (AI uses full forms)
+    if tone != "academic":
+        contraction_map = {
+            r'\bdo not\b': "don't", r'\bcannot\b': "can't",
+            r'\bwill not\b': "won't", r'\bis not\b': "isn't",
+            r'\bare not\b': "aren't", r'\bwas not\b': "wasn't",
+            r'\bhas not\b': "hasn't", r'\bhave not\b': "haven't",
+            r'\bI am\b': "I'm", r'\bI have\b': "I've",
+            r'\bI will\b': "I'll", r'\bwould not\b': "wouldn't",
+            r'\bshould not\b': "shouldn't", r'\bcould not\b': "couldn't",
+            r'\bit is\b': "it's", r'\bthat is\b': "that's",
+            r'\bthere is\b': "there's", r'\blet us\b': "let's",
+        }
+        for pattern, replacement in contraction_map.items():
+            if random.random() < 0.7:  # 70% chance per contraction
+                text = re.sub(pattern, replacement, text, count=1, flags=re.I)
+
+    return text
+
+
 def advanced_post_process(text, tone="casual"):
     """Advanced post-processing pipeline with all humanization steps. Tone-aware."""
     # Phase 1: Fast mechanical (cached) — no LLM needed
     text = cache_replace(text)
     text = sentence_pattern_cache(text)
+    text = ngram_breaker(text)
+    text = specificity_inject(text)  # #8: vague→specific numbers early
 
     if tone == "academic":
         # Academic: formal only — NO casual injects
-        # Strip casual phrases LLM might have generated
         text = _strip_casual_phrases(text)
         text = synonym_rotate(text)
+        text = register_mixing(text, tone)  # #5: formal↔informal mix
         text = _burstiness_inject_academic(text)
         text = emdash_inject(text)
         text = _academic_filler_inject(text)
         text = _academic_ultra_short_inject(text)
-        # Research-backed: hedging + temporal (formal versions)
         text = cognitive_tentativeness_inject(text)
         text = temporal_reference_inject(text)
-        # Final strip pass to catch anything remaining
+        text = typo_inject(text, tone)  # #1: light imperfections
         text = _strip_casual_phrases(text)
     else:
-        # Casual/Business: mechanical transforms + burstiness only
-        # NO filler/colloquial/fragment injectors — LLM already casual
+        # Casual/Business: full pipeline
         text = synonym_rotate(text)
         text = jargon_drop(text)
         text = perplexity_word_sub(text)
         text = syntactic_variation(text)
         text = pronoun_escalation(text)
+        text = register_mixing(text, tone)  # #5: formal↔informal mix
+        text = anecdote_inject(text, tone)
+        text = opinion_inject(text, tone)
+        text = quotation_inject(text)  # #7: attributed speech
         text = depassivize(text)
+        text = typo_inject(text, tone)  # #1: imperfections
+        text = fragment_inject(text)  # #2: sentence fragments
+        text = self_correction_inject(text)  # #4: self-corrections
         text = sentence_length_chaos(text)
+        text = asymmetric_pairing(text)
         text = sentence_starter_diversity(text)
         text = paragraph_rhythm(text)
 
     # New: Perplexity injection + Zipf redistribution
     text = perplexity_inject(text)
     text = zipf_redistribute(text)
+    text = perplexity_targeted(text)
     text = sentence_order_shuffle(text)
+    text = chunk_reorder(text)
+    text = detector_evasion(text, tone)  # #5: target specific ZeroGPT signals
+    text = rewrite_low_perplexity(text, tone)  # #3: rare word injection
+    text = adversarial_paraphrase(text, tone)  # #10: perplexity optimization
+    text = statistical_mimicry(text, tone)  # #12: match human stats
+    text = enforce_syntax_diversity(text, tone)  # #4: break syntax patterns
+    text = citation_inject(text, tone)  # #8: citation/reference density
+    text = style_noise_inject(text, tone)  # #11: noise injection
 
     # Final cleanup
     text = re.sub(r'\.\s*\.', '.', text)
@@ -2083,24 +3281,11 @@ def length_preserving_adjust(result, target_words, tolerance=0.05):
         return ' '.join(kept)
 
     elif current_words < lower_bound:
-        # Too short — duplicate some sentences with variation
-        # This is a fallback; normally LLM expansion is better
+        # Too short — return as-is (prompts should prevent this)
         deficit = lower_bound - current_words
-        added = 0
-        result_sentences = list(sentences)
-        for s in sentences:
-            if added >= deficit:
-                break
-            # Add a bridging sentence that elaborates on the previous
-            words = s.split()
-            if len(words) > 8:
-                # Extract key phrase and create elaboration
-                key_phrase = ' '.join(words[2:6]) if len(words) > 5 else ''
-                if key_phrase:
-                    elaboration = f"This relates to {key_phrase.lower()}, which warrants further consideration."
-                    result_sentences.append(elaboration)
-                    added += len(elaboration.split())
-        return ' '.join(result_sentences)
+        if deficit <= 30:
+            return result  # Close enough
+        return result  # Prompts enforce length; no garbage templates
 
     return result
 
@@ -2145,7 +3330,134 @@ def zerogpt_check(text):
         return {"score": None, "source": "zerogpt", "error": str(e)[:100]}
 
 
-# ─── Feature: Selective LLM Rewrite (Perplexity-Aware) ────────────
+# ─── #15: GPTZero API ────────────────────────────────────────────────
+
+def gptzero_check(text):
+    """Check text against GPTZero API. Free tier: 10k words/mo."""
+    try:
+        check_text = text[:5000]
+        payload = json.dumps({"document": check_text}).encode()
+        req = urllib.request.Request(
+            "https://api.gptzero.me/v2/predict/text",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+
+        documents = data.get("documents", [])
+        if documents:
+            doc = documents[0]
+            return {
+                "score": round(doc.get("average_generated_prob", 0) * 100, 1),
+                "source": "gptzero",
+                "completely_generated_prob": doc.get("completely_generated_prob", 0),
+                "overall_burstiness": doc.get("overall_burstiness", 0),
+                "error": None,
+            }
+        return {"score": None, "source": "gptzero", "error": "no documents in response"}
+    except Exception as e:
+        return {"score": None, "source": "gptzero", "error": str(e)[:100]}
+
+
+# ─── #17: Copyleaks API ──────────────────────────────────────────────
+
+def copyleaks_check(text):
+    """Check text against Copyleaks AI detection. Free tier available."""
+    try:
+        check_text = text[:3000]
+        payload = json.dumps({"text": check_text, "sandbox": True}).encode()
+        req = urllib.request.Request(
+            "https://api.copyleaks.com/v2/writer-detector",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+
+        return {
+            "score": round(data.get("ai", {}).get("score", 0) * 100, 1),
+            "source": "copyleaks",
+            "is_ai": data.get("ai", {}).get("is_ai", False),
+            "error": None,
+        }
+    except Exception as e:
+        return {"score": None, "source": "copyleaks", "error": str(e)[:100]}
+
+
+# ─── #18: Sapling API ────────────────────────────────────────────────
+
+def sapling_check(text):
+    """Check text against Sapling AI detection. Free tier available."""
+    try:
+        check_text = text[:3000]
+        payload = json.dumps({"text": check_text}).encode()
+        req = urllib.request.Request(
+            "https://api.sapling.ai/api/v1/aidetect",
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read())
+
+        return {
+            "score": round(data.get("score", 0) * 100, 1),
+            "source": "sapling",
+            "error": None,
+        }
+    except Exception as e:
+        return {"score": None, "source": "sapling", "error": str(e)[:100]}
+
+
+# ─── Multi-Detector Consensus ────────────────────────────────────────
+
+def multi_detector_check(text):
+    """Run text through multiple detectors, return consensus score.
+    Tries: internal → ZeroGPT → GPTZero → Sapling.
+    Returns best available score + all results."""
+    results = {}
+
+    # Always run internal
+    internal = calc_detection_score(text)
+    results["internal"] = {"score": internal["score"], "grade": internal["grade"]}
+
+    # Try external detectors (fail silently)
+    zg = zerogpt_check(text)
+    if zg.get("score") is not None:
+        results["zerogpt"] = zg
+
+    gz = gptzero_check(text)
+    if gz.get("score") is not None:
+        results["gptzero"] = gz
+
+    sp = sapling_check(text)
+    if sp.get("score") is not None:
+        results["sapling"] = sp
+
+    # Calculate consensus (average of available external scores)
+    external_scores = [r["score"] for k, r in results.items() if k != "internal" and r.get("score") is not None]
+    if external_scores:
+        consensus = round(sum(external_scores) / len(external_scores), 1)
+    else:
+        consensus = internal["score"]
+
+    return {
+        "consensus": consensus,
+        "results": results,
+        "detectors_used": len(external_scores),
+    }
 # Score each sentence, rewrite ONLY high-AI ones via LLM.
 # Saves tokens, preserves natural voice, targets problem areas.
 
@@ -2712,13 +4024,160 @@ def sentence_order_shuffle(text):
 
 # ─── Feedback Retry Loop ────────────────────────────────────────────
 
-def feedback_retry(result_text, original_chunks, passes, model, tone, max_retries=2):
+
+
+# --- #8: Cross-chunk Context Continuity ---
+def cross_chunk_continuity(text):
+    """Ensure vocabulary and sentence patterns consistent across paragraph boundaries."""
+    random.seed(hash(text) % 2**32 + 208)
+    paragraphs = text.split('\n\n')
+    if len(paragraphs) < 2:
+        return text
+    result = [paragraphs[0]]
+    for i in range(1, len(paragraphs)):
+        curr = paragraphs[i]
+        curr_sentences = re.split(r'(?<=[.!?])\s+', curr.strip())
+        if not curr_sentences:
+            result.append(curr)
+            continue
+        first_curr = curr_sentences[0]
+        first_word = first_curr.split()[0].lower().rstrip('.,!?') if first_curr.split() else ''
+        formal_transitions = ['furthermore', 'moreover', 'additionally', 'consequently',
+                              'subsequently', 'nevertheless', 'nonetheless']
+        if first_word in formal_transitions and random.random() < 0.5:
+            casual = random.choice(['Also, ', 'Plus, ', 'And ', 'On top of that, '])
+            rest = ' '.join(first_curr.split()[1:])
+            if rest:
+                rest = rest[0].upper() + rest[1:]
+            curr_sentences[0] = casual + rest
+            curr = ' '.join(curr_sentences)
+        result.append(curr)
+    return '\n\n'.join(result)
+
+
+
+
+# --- #10: Vocabulary Perplexity Targeting ---
+UNCOMMON_BUT_NATURAL = [
+    'quirky', 'hazy', 'snag', 'gritty', 'murky', 'fuzzy', 'tricky',
+    'sketchy', 'precarious', 'tenuous', 'fractured', 'lopsided',
+    'fleeting', 'patchy', 'clunky', 'cumbersome', 'unwieldy',
+    'messy', 'tedious', 'mundane', 'arcane', 'obscure',
+    'cryptic', 'subtle', 'faint', 'vague', 'dim',
+    'stark', 'bleak', 'grim', 'steep', 'sheer', 'utter',
+    'downright', 'outright', 'blatant', 'flagrant', 'glaring',
+    'blunt', 'crisp', 'abrupt', 'swift', 'hasty',
+    'aberrant', 'anomalous', 'atypical', 'erratic', 'sporadic',
+]
+
+def perplexity_targeted(text):
+    """Swap words at strategic positions with uncommon-but-natural alternatives."""
+    random.seed(hash(text) % 2**32 + 210)
+    paragraphs = text.split('\n\n')
+    result = []
+    for para in paragraphs:
+        sentences = re.split(r'(?<=[.!?])\s+', para)
+        if len(sentences) < 2:
+            result.append(para)
+            continue
+        new_sentences = []
+        for i, s in enumerate(sentences):
+            words = s.split()
+            if len(words) < 4:
+                new_sentences.append(s)
+                continue
+            if i == 0 and random.random() < 0.15:
+                swap_idx = min(2, len(words) - 1)
+                w = words[swap_idx].lower().rstrip('.,!?')
+                if len(w) > 3 and w not in ('the', 'and', 'but', 'for', 'not', 'with'):
+                    replacement = random.choice(UNCOMMON_BUT_NATURAL)
+                    trail = ''
+                    for ch in reversed(words[swap_idx]):
+                        if ch in '.,!?': trail = ch + trail
+                        else: break
+                    if words[swap_idx][0].isupper():
+                        replacement = replacement.title()
+                    words[swap_idx] = replacement + trail
+            elif i == len(sentences) - 1 and random.random() < 0.10:
+                swap_idx = max(0, len(words) - 3)
+                w = words[swap_idx].lower().rstrip('.,!?')
+                if len(w) > 3 and w not in ('the', 'and', 'but', 'for', 'not'):
+                    replacement = random.choice(UNCOMMON_BUT_NATURAL)
+                    trail = ''
+                    for ch in reversed(words[swap_idx]):
+                        if ch in '.,!?': trail = ch + trail
+                        else: break
+                    if words[swap_idx][0].isupper():
+                        replacement = replacement.title()
+                    words[swap_idx] = replacement + trail
+            new_sentences.append(' '.join(words))
+        result.append(' '.join(new_sentences))
+    return '\n\n'.join(result)
+
+
+
+
+# --- #2: Semantic Chunk Reordering ---
+TRANSITIONS_REORDER = [
+    "But here's another angle:", "On a related note,",
+    "Switching gears a bit,", "This connects to something else:",
+    "And another thing —", "Jumping to a different point,",
+    "Related to this,", "Here's where it gets interesting:",
+]
+
+def chunk_reorder(text):
+    """Shuffle paragraph order and add transition sentences for coherence."""
+    random.seed(hash(text) % 2**32 + 202)
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+    if len(paragraphs) < 3:
+        return text
+    intro = paragraphs[0]
+    conclusion = paragraphs[-1]
+    middle = paragraphs[1:-1]
+    if len(middle) < 2:
+        return text
+    list_count = sum(1 for p in middle if re.match(r'^\s*[\d\-\*]', p))
+    if list_count > len(middle) * 0.5:
+        return text
+    random.shuffle(middle)
+    if middle:
+        transition = random.choice(TRANSITIONS_REORDER)
+        starts_with_transition = any(middle[0].lower().startswith(t.lower()[:10]) for t in TRANSITIONS_REORDER)
+        if not starts_with_transition and len(middle[0].split()) > 10:
+            middle[0] = transition + ' ' + middle[0][0].lower() + middle[0][1:]
+    return intro + '\n\n' + '\n\n'.join(middle) + '\n\n' + conclusion
+
+
+
+def feedback_retry(result_text, original_chunks, passes, model, tone, max_retries=2, use_zerogpt=True):
     paragraphs = re.split(r'\n\n', result_text)
     flagged_indices = []
-    for i, para in enumerate(paragraphs):
-        score = calc_detection_score(para)
-        if score['score'] > 50 and len(para.split()) > 30:
-            flagged_indices.append(i)
+
+    # #9: Try multi-detector API first
+    api_score = None
+    if use_zerogpt:
+        md = multi_detector_check(result_text)
+        external = [v["score"] for k, v in md["results"].items() if k != "internal" and v.get("score") is not None]
+        if external:
+            api_score = round(sum(external) / len(external), 1)
+            print(f"[feedback] Multi-detector consensus: {api_score}% ({len(external)} detectors)", flush=True)
+            if api_score < 15:
+                print(f"[feedback] Consensus says HUMAN ({api_score}%), skipping retry", flush=True)
+                return result_text
+            if api_score > 25:
+                print(f"[feedback] Consensus says AI ({api_score}%), flagging all paragraphs", flush=True)
+                for i, para in enumerate(paragraphs):
+                    if len(para.split()) > 30:
+                        flagged_indices.append(i)
+        else:
+            print(f"[feedback] ZeroGPT unavailable ({zg.get('error', 'unknown')}), using internal", flush=True)
+
+    if not flagged_indices:
+        for i, para in enumerate(paragraphs):
+            score = calc_detection_score(para)
+            if score['score'] > 50 and len(para.split()) > 30:
+                flagged_indices.append(i)
+
     if not flagged_indices:
         return result_text
     print(f"[feedback] Retrying {len(flagged_indices)} flagged paragraphs (max {max_retries} attempts)", flush=True)
@@ -2801,6 +4260,24 @@ MODEL_FALLBACK_CHAIN = [
     "ag/gemini-3-flash",
 ]
 
+def get_alt_model(primary):
+    """Get a different model for multi-pass/multi-chunk strategy."""
+    for m in MODEL_FALLBACK_CHAIN:
+        if m != primary:
+            return m
+    return MODEL_FALLBACK_CHAIN[0]
+
+def multi_model_chunk_assign(chunks, primary_model):
+    """Assign different models to different chunks to break detector fingerprint."""
+    models = [primary_model]
+    for m in MODEL_FALLBACK_CHAIN:
+        if m != primary_model:
+            models.append(m)
+    assignments = []
+    for i in range(len(chunks)):
+        assignments.append(models[i % len(models)])
+    return assignments
+
 def check_output_quality(original, result):
     """Detect garbage output: severe compression, word counting, hallucination."""
     if not result or not result.strip():
@@ -2809,9 +4286,13 @@ def check_output_quality(original, result):
     orig_words = len(original.split())
     result_words = len(result.split())
     
-    # Severe compression (< 40% of original)
-    if orig_words > 20 and result_words < orig_words * 0.4:
-        return False, f"severe compression ({result_words}/{orig_words} words)"
+    # Compression check — reject if output lost >50% of input words
+    if orig_words > 20 and result_words < orig_words * 0.5:
+        return False, f"too much compression ({result_words}/{orig_words} = {result_words*100//orig_words}%, need 50%+)"
+    
+    # Over-expansion check — reject if output is 2x+ input (LLM hallucinating extra content)
+    if orig_words > 20 and result_words > orig_words * 2.0:
+        return False, f"over-expansion ({result_words}/{orig_words} = {result_words*100//orig_words}%, max 200%)"
     
     # Word counting garbage
     garbage_patterns = [
@@ -2828,7 +4309,7 @@ def check_output_quality(original, result):
     result_words_set = set(w.lower() for w in result.split() if len(w) > 5)
     if orig_words_set:
         overlap = len(orig_words_set & result_words_set) / len(orig_words_set)
-        if overlap < 0.1:  # less than 10% vocabulary overlap
+        if overlap < 0.05:  # less than 5% vocabulary overlap
             return False, f"hallucination (only {overlap:.0%} vocab overlap)"
     
     return True, "ok"
@@ -2979,8 +4460,8 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
         # Auto-retry if score still bad
         if AUTO_RETRY:
             score = calc_detection_score(result)
-            if score['score'] > 40:
-                print(f"[humanize] Score {score['score']} > 40, retrying...", flush=True)
+            if score['score'] > 20:
+                print(f"[humanize] Score {score['score']} > 20, retrying...", flush=True)
                 result = humanize_chunk(text, passes, model, tone)
                 result = advanced_post_process(result, tone=tone)
                 result = paragraph_vary(result)
@@ -2992,12 +4473,16 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     total_chunks = len(chunks)
     print(f"[humanize] Long text, split into {total_chunks} chunks (parallel={PARALLEL_CHUNKS})", flush=True)
 
+    # Multi-model chunk assignment — different models per chunk breaks detector fingerprint
+    chunk_models = multi_model_chunk_assign(chunks, model)
+    print(f"[humanize] Multi-model: {len(set(chunk_models))} models across {total_chunks} chunks", flush=True)
+
     # Parallel processing
     processed_chunks = [None] * total_chunks
     completed = 0
 
     with ThreadPoolExecutor(max_workers=min(PARALLEL_CHUNKS, total_chunks)) as executor:
-        work_items = [(i, chunk, passes, model, tone) for i, chunk in enumerate(chunks)]
+        work_items = [(i, chunk, passes, chunk_models[i], tone) for i, chunk in enumerate(chunks)]
         futures = {executor.submit(_process_chunk_worker, item): item[0] for item in work_items}
 
         for future in as_completed(futures):
@@ -3024,6 +4509,7 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     # Smooth transitions between chunks (Feature 8)
     processed_chunks = deduplicate_overlaps(processed_chunks)
     result = smooth_transitions(processed_chunks, tone=tone)
+    result = cross_chunk_continuity(result)
 
     # Final pass - tone-aware
     if tone != "academic":
@@ -3061,6 +4547,86 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     # New: Paragraph-level feedback retry
     result = feedback_retry(result, chunks, passes, model or LLM_MODEL, tone)
 
+    # #2: Targeted sentence retry — only rewrite sentences scoring >30
+    score_after_feedback = calc_detection_score(result)
+    print(f"[targeted] Score after feedback: {score_after_feedback['score']}%", flush=True)
+
+    if score_after_feedback['score'] > 10:
+        sentences = re.split(r'(?<=[.!?])\s+', result)
+        flagged = []
+        for i, sent in enumerate(sentences):
+            if len(sent.split()) >= 6:
+                s_score = score_sentence_ai(sent)
+                if s_score > 30:
+                    flagged.append((i, sent, s_score))
+
+        if flagged:
+            alt_model = get_alt_model(model or LLM_MODEL)
+            print(f"[targeted] {len(flagged)}/{len(sentences)} sentences flagged (>{30}), retrying with {alt_model}...", flush=True)
+            for idx, sent, s_score in flagged:
+                try:
+                    # Rewrite just this sentence with alt model
+                    rewrite_prompt = f"""Rewrite this single sentence to sound human-written. Keep the same meaning and facts.
+Rules: use contractions, vary word choice, add a casual touch. Keep it {len(sent.split())-2} to {len(sent.split())+3} words.
+NEVER use: Furthermore, Moreover, Additionally, Consequently, It is important to note.
+Output ONLY the rewritten sentence. No quotes, no explanation."""
+
+                    rewritten = cached_llm_call(sent, system=rewrite_prompt, temperature=0.85, model=alt_model)
+                    if rewritten and rewritten.strip():
+                        # Clean up
+                        rewritten = rewritten.strip().strip('"').strip("'")
+                        if not rewritten.endswith(('.', '!', '?')):
+                            rewritten += '.'
+                        # Verify it's not garbage
+                        orig_words = set(w.lower() for w in sent.split() if len(w) > 4)
+                        new_words = set(w.lower() for w in rewritten.split() if len(w) > 4)
+                        if orig_words and new_words:
+                            overlap = len(orig_words & new_words) / len(orig_words)
+                            if overlap > 0.2:  # at least 20% vocab overlap
+                                sentences[idx] = rewritten
+                                print(f"[targeted]   ✅ Sentence {idx+1}: {s_score}→rewritten", flush=True)
+                            else:
+                                print(f"[targeted]   ⚠️ Sentence {idx+1}: too different (overlap={overlap:.0%}), skipping", flush=True)
+                        else:
+                            sentences[idx] = rewritten
+                except Exception as e:
+                    print(f"[targeted]   ❌ Sentence {idx+1}: {e}", flush=True)
+
+            result = ' '.join(sentences)
+            result = re.sub(r'\s+', ' ', result).strip()
+
+            # Re-score
+            new_score = calc_detection_score(result)
+            print(f"[targeted] After targeted retry: {new_score['score']}%", flush=True)
+
+            # If still >15, do a SECOND targeted pass with different model
+            if new_score['score'] > 15:
+                model3 = MODEL_FALLBACK_CHAIN[2] if len(MODEL_FALLBACK_CHAIN) > 2 else alt_model
+                sentences2 = re.split(r'(?<=[.!?])\s+', result)
+                flagged2 = []
+                for i, sent in enumerate(sentences2):
+                    if len(sent.split()) >= 6:
+                        s_score = score_sentence_ai(sent)
+                        if s_score > 25:
+                            flagged2.append((i, sent, s_score))
+                if flagged2:
+                    print(f"[targeted-pass2] {len(flagged2)} sentences, model={model3}...", flush=True)
+                    for idx, sent, s_score in flagged2:
+                        try:
+                            rewrite2 = f"""Rewrite casually. Keep meaning. {len(sent.split())-2}-{len(sent.split())+3} words. Contractions. No AI words. Output ONLY the sentence."""
+                            rewritten = cached_llm_call(sent, system=rewrite2, temperature=0.90, model=model3)
+                            if rewritten and rewritten.strip():
+                                rewritten = rewritten.strip().strip('"').strip("'")
+                                if not rewritten.endswith(('.', '!', '?')):
+                                    rewritten += '.'
+                                sentences2[idx] = rewritten
+                        except:
+                            pass
+                    result = ' '.join(sentences2)
+                    result = re.sub(r'\s+', ' ', result).strip()
+                    final_score = calc_detection_score(result)
+                    print(f"[targeted-pass2] Final: {final_score['score']}%", flush=True)
+
     # Deduplicate repeated sentences
     lines = result.split('.')
     seen = set()
@@ -3075,6 +4641,15 @@ def humanize(text, passes=3, model=None, tone="casual", progress_cb=None):
     result = '.'.join(deduped).strip()
     result = result.replace('..', '.')
     
+    # #1: Style zone randomization — break uniform style signal
+    result = style_zone_randomize(result, tone=tone)
+
+    # #5: Progressive tone shift — formal→casual drift
+    result = progressive_tone_shift(result, tone=tone)
+
+    # #2: Human corpus injection — 25% real human paragraphs
+    result = inject_human_corpus(result, ratio=0.25)
+
     # Restore protected blocks (code, tables, citations)
     for placeholder, original in protected_blocks:
         result = result.replace(placeholder, original)
@@ -4062,6 +5637,10 @@ HTML = r"""<!DOCTYPE html>
         </div>
       </div>
       <textarea id="output" placeholder="Humanized text will appear here..." readonly></textarea>
+      <div id="status" style="font-size:12px;color:var(--text-muted);min-height:18px;padding:4px 0;"></div>
+      <div id="progressBar" style="display:none;height:3px;background:var(--border);border-radius:2px;margin:4px 0;">
+        <div id="progressFill" style="height:100%;background:var(--accent);border-radius:2px;width:0%;transition:width 0.3s;"></div>
+      </div>
       <div class="editor-foot">
         <span id="outputWords">0 words</span>
         <span id="outputScore">Score: --</span>
@@ -4334,8 +5913,8 @@ async function humanize() {
   var startTime = Date.now();
   btn.disabled = true;
   output.value = '';
-  progressBar.style.display = 'block';
-  progressFill.style.width = '2%';
+  if(progressBar) progressBar.style.display = 'block';
+  if(progressFill) progressFill.style.width = '2%';
   output.classList.add('typewriter-cursor');
   status.innerHTML = 'Starting... ' + words + ' words (' + chunks + ' chunk' + (chunks>1?'s':'') + ', parallel)';
 
@@ -4350,7 +5929,7 @@ async function humanize() {
         model: model, 
         tone: tone, 
         domain: document.getElementById('domain').value, 
-        ref_sample: document.getElementById('refSample').value,
+        ref_sample: (document.getElementById('refSample') || {}).value || '',
         autoRetry: document.getElementById('autoRetry')?.checked || false,
         strictWordCount: document.getElementById('strictWordCount')?.checked || false
       })
@@ -4411,7 +5990,6 @@ async function humanize() {
           done = true;
           progressFill.style.width = '100%';
           var es1 = document.getElementById('outputEmptyState'); if(es1) es1.style.display='none'; output.style.display='block';
-          document.getElementById('outputEmptyState').style.display='none';
           output.value = prog.result || prog.partial;
           output.classList.remove('typewriter-cursor');
           var sp2 = document.getElementById('stepProgress');
@@ -5261,7 +6839,14 @@ function exportPDF() {
     '.meta{font-size:11px;color:#666;margin-bottom:30px;font-family:monospace;}</style></head><body>' +
     '<h1>Humanized Text</h1>' +
     '<div class="meta">Generated: ' + new Date().toLocaleString() + ' | Words: ' + text.split(/\s+/).length + '</div>' +
-    '<div>' + text.replace(/\n/g, '<br>') + '</div>
+    '<div>' + text.replace(/\\n/g, '<br>') + '</div></body></html>');
+  doc.close();
+  setTimeout(function() {
+    iframe.contentWindow.print();
+    setTimeout(function() { document.body.removeChild(iframe); }, 1000);
+  }, 500);
+}
+</script>
 <!-- Floating Panel Container -->
 <div id="grammarPanel" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200;background:var(--paper);border:1px solid var(--border);padding:24px;max-width:600px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:var(--shadow-lg);">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
@@ -5380,15 +6965,7 @@ function exportPDF() {
   <div id="abTestPanel_content">Running A/B test...</div>
 </div>
 
-</body></html>');
-  doc.close();
-  
-  setTimeout(function() {
-    iframe.contentWindow.print();
-    setTimeout(function() { document.body.removeChild(iframe); }, 1000);
-  }, 500);
-}
-
+<script>
 // ── #7: Intensity Slider UI ──
 function updateIntensityLabel() {
   var slider = document.getElementById('intensitySlider');
@@ -5508,18 +7085,6 @@ function analyzeKeywords() {
     }).join('');
 }
 
-// ── Toast notification system ──
-function showToast(msg, type) {
-  type = type || 'info';
-  var colors = {success:'#00cc88', error:'#ef4444', warning:'#fbbf24', info:'#3b82f6'};
-  var toast = document.createElement('div');
-  toast.className = 'toast-notification';
-  toast.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;background:var(--card);border:1px solid ' + colors[type] + ';border-left:3px solid ' + colors[type] + ';color:var(--text);font-size:12px;z-index:10000;animation:slideIn 0.3s ease;max-width:400px;font-family:Inter,sans-serif;';
-  toast.textContent = msg;
-  document.body.appendChild(toast);
-  setTimeout(function() { toast.style.animation = 'slideOut 0.3s ease'; setTimeout(function() { toast.remove(); }, 300); }, 3000);
-}
-
 // ── Init all addon features ──
 (function() {
   // CSS additions
@@ -5594,383 +7159,6 @@ function initAddons() {
   try { _readabilityHistory = JSON.parse(localStorage.getItem('humanizer_readability') || '[]'); } catch(e) {}
   updateReadabilityChart();
 }
-
-// ═══════════════════════════════════════════════════════════════
-// ADDON: 39 Features - Stats, Auto-save, Skeleton, Context Menu, etc.
-// ═══════════════════════════════════════════════════════════════
-
-// ── #61, #62, #63: Extended Stats (chars, paragraphs, sentences) ──
-function updateExtendedStats() {
-  var inp = document.getElementById('input').value;
-  var out = document.getElementById('output').value;
-  var statsEl = document.getElementById('extendedStats');
-  if(!statsEl) return;
-  var inChars = inp.length, outChars = out.length;
-  var inParas = inp.trim() ? inp.trim().split(/\n\s*\n/).length : 0;
-  var outParas = out.trim() ? out.trim().split(/\n\s*\n/).length : 0;
-  var inSents = inp.trim() ? (inp.match(/[.!?]+/g) || []).length : 0;
-  var outSents = out.trim() ? (out.match(/[.!?]+/g) || []).length : 0;
-  var inWords = inp.trim() ? inp.trim().split(/\s+/).length : 0;
-  var outWords = out.trim() ? out.trim().split(/\s+/).length : 0;
-  var avgIn = inSents > 0 ? Math.round(inWords / inSents) : 0;
-  var avgOut = outSents > 0 ? Math.round(outWords / outSents) : 0;
-  var uIn = new Set(inp.toLowerCase().match(/\b\w+\b/g) || []).size;
-  var uOut = new Set(out.toLowerCase().match(/\b\w+\b/g) || []).size;
-  statsEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11px;font-family:JetBrains Mono,monospace;">' +
-    '<div><span style="color:var(--muted);">Chars:</span> '+inChars.toLocaleString()+' → '+outChars.toLocaleString()+'</div>' +
-    '<div><span style="color:var(--muted);">Paras:</span> '+inParas+' → '+outParas+'</div>' +
-    '<div><span style="color:var(--muted);">Sents:</span> '+inSents+' → '+outSents+'</div>' +
-    '<div><span style="color:var(--muted);">Avg/Sent:</span> '+avgIn+' → '+avgOut+'w</div>' +
-    '<div><span style="color:var(--muted);">Unique:</span> '+uIn+' → '+uOut+'</div>' +
-    '<div><span style="color:var(--muted);">Vocab:</span> '+(inWords>0?Math.round(uIn/inWords*100):0)+'% → '+(outWords>0?Math.round(uOut/outWords*100):0)+'%</div></div>';
-}
-
-// ── #72: Auto-save drafts every 30s ──
-var _autoSaveTimer = null;
-function startAutoSave() {
-  if(_autoSaveTimer) clearInterval(_autoSaveTimer);
-  _autoSaveTimer = setInterval(function() {
-    var inp = document.getElementById('input').value;
-    if(inp && inp.length > 50) {
-      localStorage.setItem('humanizer_draft', JSON.stringify({text:inp, saved:new Date().toISOString(), words:inp.split(/\s+/).length}));
-    }
-  }, 30000);
-}
-function loadDraft() {
-  try {
-    var d = JSON.parse(localStorage.getItem('humanizer_draft'));
-    var input = document.getElementById('input');
-    if(d && !input.value && d.text) {
-      input.value = d.text; updateWordCount();
-      showToast('Draft restored ('+d.words+' words)', 'info');
-    }
-  } catch(e) {}
-}
-
-// ── #51: Skeleton Loader ──
-function showSkeleton(el) {
-  if(!el) return;
-  el.innerHTML = '<div class="skeleton-wrap"><div class="skel-line" style="width:90%"></div><div class="skel-line" style="width:75%"></div><div class="skel-line" style="width:85%"></div><div class="skel-line" style="width:60%"></div><div class="skel-line" style="width:80%"></div><div class="skel-line" style="width:70%"></div><div class="skel-line" style="width:90%"></div><div class="skel-line" style="width:45%"></div></div>';
-}
-
-// ── #52: Empty State ──
-function showEmptyState() {
-  var output = document.getElementById('output');
-  if(output && !output.value) {
-    var w = output.parentElement;
-    if(!w.querySelector('.empty-state')) {
-      var es = document.createElement('div');
-      es.className = 'empty-state';
-      es.innerHTML = '<svg viewBox="0 0 200 150" width="120" style="margin:40px auto;display:block;opacity:0.3;"><rect x="30" y="20" width="140" height="110" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="50" y1="45" x2="150" y2="45" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="50" y1="60" x2="130" y2="60" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="50" y1="75" x2="145" y2="75" stroke="currentColor" stroke-width="1" opacity="0.5"/><line x1="50" y1="90" x2="110" y2="90" stroke="currentColor" stroke-width="1" opacity="0.5"/><circle cx="160" cy="110" r="20" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M155 110 L165 110 M160 105 L160 115" stroke="currentColor" stroke-width="2"/></svg><p style="text-align:center;color:var(--muted);font-style:italic;font-family:Playfair Display,serif;">Paste AI-generated text to humanize</p>';
-      output.style.opacity = '0'; w.insertBefore(es, output);
-    }
-  }
-}
-function hideEmptyState() {
-  var es = document.querySelector('.empty-state');
-  if(es) es.remove();
-  var o = document.getElementById('output');
-  if(o) o.style.opacity = '1';
-}
-
-// ── #55: Context Menu ──
-var _ctxMenu = null;
-function initContextMenu() {
-  document.addEventListener('contextmenu', function(e) {
-    var t = e.target;
-    if(t.tagName === 'TEXTAREA' || t.closest('textarea')) {
-      e.preventDefault(); removeContextMenu();
-      _ctxMenu = document.createElement('div');
-      _ctxMenu.className = 'ctx-menu';
-      [{l:'Humanize Selection',a:function(){humanizeSelection();}},
-       {l:'Grammar Check',a:function(){if(typeof checkGrammar==='function')checkGrammar();}},
-       {l:'Check Readability',a:function(){if(typeof checkReadability==='function')checkReadability();}},
-       {l:'Copy',a:function(){navigator.clipboard.writeText(t.value||t.textContent);showToast('Copied','success');}},
-       {l:'Paste',a:async function(){try{t.value=await navigator.clipboard.readText();updateWordCount();}catch(x){}}},
-       {l:'Clear',a:function(){t.value='';updateWordCount();}},
-       {l:'Detect Jargon',a:function(){detectJargon(t);}},
-       {l:'Scan Watermarks',a:function(){scanWatermarks();}},
-       {l:'Remove Watermarks',a:function(){removeWatermarks();}}
-      ].forEach(function(item) {
-        var d = document.createElement('div');
-        d.className = 'ctx-item'; d.textContent = item.l;
-        d.onclick = function() { item.a(); removeContextMenu(); };
-        _ctxMenu.appendChild(d);
-      });
-      _ctxMenu.style.left = e.pageX+'px'; _ctxMenu.style.top = e.pageY+'px';
-      document.body.appendChild(_ctxMenu);
-    }
-  });
-  document.addEventListener('click', removeContextMenu);
-}
-function removeContextMenu() { if(_ctxMenu){_ctxMenu.remove();_ctxMenu=null;} }
-function humanizeSelection() {
-  var sel = window.getSelection().toString();
-  if(!sel) sel = document.getElementById('input').value;
-  if(sel) { document.getElementById('input').value = sel; if(typeof startHumanize==='function') startHumanize(); }
-}
-
-// ── #56: Breadcrumb ──
-function updateBreadcrumb(path) {
-  var bc = document.getElementById('breadcrumb');
-  if(!bc) return;
-  bc.innerHTML = path.map(function(item,i) {
-    if(i===path.length-1) return '<span class="bc-current">'+item+'</span>';
-    return '<span class="bc-link" onclick="navigateBreadcrumb(\''+item+'\')">'+item+'</span><span class="bc-sep">›</span>';
-  }).join('');
-}
-function navigateBreadcrumb(item) {
-  if(item==='Home') updateBreadcrumb(['Home']);
-  else if(item==='History') updateBreadcrumb(['Home','History']);
-}
-
-// ── #60: Sort History ──
-var _historySortKey = 'date';
-function sortHistory(key) {
-  _historySortKey = key;
-  fetch('/api/history').then(function(r){return r.json();}).then(function(hist) {
-    if(key==='date') hist.sort(function(a,b){return new Date(b.timestamp)-new Date(a.timestamp);});
-    else if(key==='words') hist.sort(function(a,b){return b.output_words-a.output_words;});
-    else if(key==='score') hist.sort(function(a,b){return a.score_after-b.score_after;});
-    renderHistoryList(hist);
-  });
-}
-function renderHistoryList(hist) {
-  var el = document.getElementById('historyList');
-  if(!el) return;
-  el.innerHTML = hist.length===0 ? '<p style="color:var(--muted);padding:12px;">No history</p>' :
-    hist.slice(0,50).map(function(h) {
-      var g = h.grade_after||'?';
-      var gc = g==='HUMAN'?'#00cc88':g==='LIKELY_HUMAN'?'#4ade80':g==='MIXED'?'#fbbf24':'#ef4444';
-      return '<div class="history-item" onclick="loadVersion('+h.id+')" style="padding:8px 12px;border-bottom:1px solid var(--border);cursor:pointer;"><div style="display:flex;justify-content:space-between;"><span style="font-size:12px;">'+h.input_words+'→'+h.output_words+'w</span><span style="font-size:10px;color:'+gc+';font-weight:600;">'+g+'</span></div><div style="font-size:10px;color:var(--muted);margin-top:2px;">'+new Date(h.timestamp).toLocaleString()+'</div></div>';
-    }).join('');
-}
-
-// ── #70: Jargon Detector ──
-function detectJargon(target) {
-  var text = target.value || target.textContent;
-  var jargon = ['utilize','leverage','synergize','paradigm','holistic','scalable','robust','seamless','cutting-edge','next-generation','disruptive','innovative','streamline','optimize','facilitate','infrastructure','methodology','framework','deliverable','stakeholder','bandwidth','circle back','deep dive','move the needle','low-hanging fruit','boil the ocean','pivot','ideate','actionable','granular','drill down','touch base','value-add','ecosystem'];
-  var found = [];
-  jargon.forEach(function(j) { var m = text.match(new RegExp('\\b'+j+'\\b','gi')); if(m) found.push({w:j,c:m.length}); });
-  if(!found.length) { showToast('No jargon detected','success'); return; }
-  showToast('Jargon: '+found.sort(function(a,b){return b.c-a.c;}).map(function(f){return f.w+' ('+f.c+'x)';}).join(', '), 'warning');
-}
-
-// ── #126: A/B Testing ──
-function startABTest() {
-  var text = document.getElementById('input').value;
-  if(!text || text.split(/\s+/).length<10) { alert('Need 10+ words'); return; }
-  var panel = document.getElementById('abTestPanel');
-  if(!panel) { alert('A/B panel not found'); return; }
-  panel.style.display = 'block';
-  document.getElementById('abStatus').textContent = 'Running A/B test...';
-  var models = ['cx/gpt-5.5','ag/claude-sonnet-4-6'];
-  Promise.all(models.map(function(m) {
-    return fetch('/api/humanize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text,passes:2,model:m,tone:'casual'})}).then(function(r){return r.json();});
-  })).then(function(results) {
-    pollABJobs(results[0].job_id, results[1].job_id);
-  }).catch(function(e){document.getElementById('abStatus').textContent='Error: '+e.message;});
-}
-function pollABJobs(jA, jB) {
-  function poll(jid) {
-    return fetch('/api/progress/'+jid).then(function(r){return r.json();}).then(function(d) {
-      if(d.status==='done') return d;
-      if(d.status==='error') throw new Error(d.error);
-      return new Promise(function(r){setTimeout(function(){poll(jid).then(r);},2000);});
-    });
-  }
-  Promise.all([poll(jA),poll(jB)]).then(function(res) {
-    document.getElementById('abStatus').textContent = 'Vote for better version:';
-    document.getElementById('abResultA').innerHTML = '<div style="padding:12px;border:1px solid var(--border);cursor:pointer;border-radius:4px;" onclick="voteAB(\'A\')"><b>Version A</b> <span style="font-size:10px;color:var(--muted);">(Score: '+(res[0].output_score?.score||'?')+')</span><div style="font-size:12px;max-height:150px;overflow-y:auto;margin-top:6px;">'+(res[0].result||'').substring(0,500)+'...</div></div>';
-    document.getElementById('abResultB').innerHTML = '<div style="padding:12px;border:1px solid var(--border);cursor:pointer;border-radius:4px;" onclick="voteAB(\'B\')"><b>Version B</b> <span style="font-size:10px;color:var(--muted);">(Score: '+(res[1].output_score?.score||'?')+')</span><div style="font-size:12px;max-height:150px;overflow-y:auto;margin-top:6px;">'+(res[1].result||'').substring(0,500)+'...</div></div>';
-    window._abResults = {A:res[0], B:res[1]};
-  }).catch(function(e){document.getElementById('abStatus').textContent='Error: '+e.message;});
-}
-function voteAB(c) {
-  var r = window._abResults[c];
-  if(r) { document.getElementById('output').value=r.result; updateWordCount(); document.getElementById('abTestPanel').style.display='none'; showToast('Version '+c+' applied!','success'); }
-}
-
-// ── #128: Custom Prompts ──
-function showCustomPrompts() {
-  var p = document.getElementById('customPromptPanel');
-  if(!p) return;
-  p.style.display = p.style.display==='none' ? 'block' : 'none';
-  var s = localStorage.getItem('humanizer_custom_prompt');
-  if(s) document.getElementById('customPromptText').value = s;
-}
-function saveCustomPrompt() {
-  var t = document.getElementById('customPromptText').value.trim();
-  if(!t) { alert('Enter a prompt'); return; }
-  localStorage.setItem('humanizer_custom_prompt', t);
-  showToast('Custom prompt saved!','success');
-}
-
-// ── #136: Model Uptime ──
-var _modelStatus = {};
-function checkModelStatus() {
-  fetch('/api/model-status').then(function(r){return r.json();}).then(function(data) {
-    _modelStatus = data;
-    var el = document.getElementById('modelStatus');
-    if(!el) return;
-    el.innerHTML = Object.entries(data).map(function(e) {
-      var m=e[0],s=e[1]; var dot=s.ok?'<span style="color:#00cc88;">●</span>':'<span style="color:#ef4444;">●</span>';
-      return '<div style="font-size:11px;padding:2px 0;">'+dot+' '+m.split('/').pop()+' <span style="color:var(--muted);">'+(s.latency_ms||'?')+'ms</span></div>';
-    }).join('') || '<span style="color:var(--muted);">No data</span>';
-  }).catch(function(){});
-}
-
-// ── #102: Export PDF ──
-function exportPDF() {
-  var text = document.getElementById('output').value;
-  if(!text) { alert('No output'); return; }
-  var iframe = document.createElement('iframe');
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
-  document.body.appendChild(iframe);
-  var d = iframe.contentWindow.document;
-  d.open();
-  d.write('<!DOCTYPE html><html><head><title>Humanized Text</title><style>body{font-family:Georgia,serif;max-width:700px;margin:40px auto;padding:20px;line-height:1.8;color:#222;}h1{font-size:18px;border-bottom:2px solid #222;padding-bottom:8px;}.meta{font-size:11px;color:#666;margin-bottom:30px;font-family:monospace;}</style></head><body><h1>Humanized Text</h1><div class="meta">Generated: '+new Date().toLocaleString()+' | Words: '+text.split(/\s+/).length+'</div><div>'+text.replace(/\n/g,'<br>')+'</div></body></html>');
-  d.close();
-  setTimeout(function(){iframe.contentWindow.print();setTimeout(function(){document.body.removeChild(iframe);},1000);},500);
-}
-
-// ── #7: Intensity Slider ──
-function updateIntensityLabel() {
-  var s = document.getElementById('intensitySlider'), l = document.getElementById('intensityLabel');
-  if(!s||!l) return;
-  var v = parseInt(s.value);
-  l.textContent = {1:'Light Touch',2:'Light',3:'Moderate',4:'Strong',5:'Heavy Rewrite'}[v] || 'Moderate';
-}
-
-// ── #15: Strategy Selector ──
-function setStrategy(s) {
-  document.querySelectorAll('.strategy-btn').forEach(function(b){b.classList.toggle('active',b.dataset.strategy===s);});
-  localStorage.setItem('humanizer_strategy', s);
-}
-
-// ── #10: Context Memory ──
-var _contextDocs = [];
-function saveToContext(text, label) {
-  _contextDocs.push({text:text.substring(0,2000), label:label, ts:Date.now()});
-  if(_contextDocs.length>10) _contextDocs.shift();
-  localStorage.setItem('humanizer_context', JSON.stringify(_contextDocs));
-  updateContextPanel();
-}
-function loadContext() { try{_contextDocs=JSON.parse(localStorage.getItem('humanizer_context')||'[]');}catch(e){_contextDocs=[];} }
-function updateContextPanel() {
-  var el = document.getElementById('contextList');
-  if(!el) return;
-  el.innerHTML = _contextDocs.length===0 ? '<span style="color:var(--muted);font-size:11px;">No context saved</span>' :
-    _contextDocs.map(function(d,i) {
-      return '<div style="font-size:11px;padding:3px 0;border-bottom:1px solid var(--border);"><span style="color:var(--accent);">#'+(i+1)+'</span> '+d.label+' <span style="color:var(--muted);">('+d.text.split(/\s+/).length+'w)</span></div>';
-    }).join('');
-}
-
-// ── #30: Readability Progression ──
-var _readabilityHistory = [];
-function trackReadability(score) {
-  _readabilityHistory.push({score:score, ts:Date.now()});
-  if(_readabilityHistory.length>20) _readabilityHistory.shift();
-  localStorage.setItem('humanizer_readability', JSON.stringify(_readabilityHistory));
-  updateReadabilityChart();
-}
-function updateReadabilityChart() {
-  var el = document.getElementById('readabilityChart');
-  if(!el || _readabilityHistory.length<2) return;
-  var mx = Math.max.apply(null, _readabilityHistory.map(function(r){return r.score;}));
-  el.innerHTML = _readabilityHistory.map(function(r) {
-    var p = mx>0?Math.round(r.score/mx*100):0;
-    var c = r.score<40?'#00cc88':r.score<60?'#fbbf24':'#ef4444';
-    return '<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin:2px 0;"><span style="width:40px;color:var(--muted);">'+new Date(r.ts).toLocaleTimeString().substring(0,5)+'</span><div style="flex:1;height:8px;background:var(--surface);border-radius:4px;"><div style="width:'+p+'%;height:100%;background:'+c+';border-radius:4px;"></div></div><span style="width:30px;text-align:right;">'+r.score+'</span></div>';
-  }).join('');
-}
-
-// ── #44: Watermark Detection ──
-function detectWatermarks(text) {
-  var s = [];
-  var zw = text.match(/[\u200B\u200C\u200D\uFEFF\u2060]/g);
-  if(zw) s.push('Zero-width chars ('+zw.length+')');
-  var cy = text.match(/[\u0400-\u04FF]/g);
-  if(cy) s.push('Cyrillic chars ('+cy.length+')');
-  var ws = text.match(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g);
-  if(ws) s.push('Unusual whitespace ('+ws.length+')');
-  return s;
-}
-function scanWatermarks() {
-  var text = document.getElementById('input').value || document.getElementById('output').value;
-  var m = detectWatermarks(text);
-  showToast(m.length===0 ? 'No watermarks detected' : 'Found: '+m.join(', '), m.length===0?'success':'warning');
-}
-function removeWatermarks() {
-  var el = document.getElementById('input');
-  el.value = el.value.replace(/[\u200B\u200C\u200D\uFEFF\u2060\u00AD]/g,'').replace(/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g,' ');
-  updateWordCount();
-  showToast('Watermarks removed','success');
-}
-
-// ── #29: Keyword Density ──
-function analyzeKeywords() {
-  var text = (document.getElementById('output').value || document.getElementById('input').value).toLowerCase();
-  var words = text.match(/\b[a-z]{4,}\b/g) || [];
-  var stop = new Set(['this','that','with','from','have','been','were','will','would','could','should','their','there','they','them','what','when','where','which','about','after','before','between','through','during','each','other','some','such','only','than','into','over','also','just','very','much','more','most','these','those','then','because','while','although','however','therefore','furthermore','moreover','nevertheless','according','including','provide','provides','provided','using','based','related','consider','important','understand','different','specific','general','example','particular','possible','available','individual','significant','additional','following','previous','current','research','study','result','analysis','system','method','process','approach','problem','solution','development','information','technology','application','performance','management','experience','education','knowledge','community','government']);
-  var freq = {};
-  words.forEach(function(w){if(!stop.has(w)&&w.length>3) freq[w]=(freq[w]||0)+1;});
-  var sorted = Object.entries(freq).sort(function(a,b){return b[1]-a[1];}).slice(0,15);
-  var total = words.length;
-  var el = document.getElementById('keywordDensity');
-  if(!el) return;
-  el.innerHTML = '<div style="font-size:11px;font-weight:600;margin-bottom:6px;">Top Keywords</div>' +
-    sorted.map(function(e) {
-      var w=e[0],c=e[1],p=(c/total*100).toFixed(1);
-      return '<div style="display:flex;align-items:center;gap:6px;font-size:10px;margin:2px 0;"><span style="width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+w+'</span><div style="flex:1;height:6px;background:var(--surface);border-radius:3px;"><div style="width:'+Math.min(parseFloat(p)*10,100)+'%;height:100%;background:var(--accent);border-radius:3px;"></div></div><span style="width:40px;text-align:right;color:var(--muted);">'+c+' ('+p+'%)</span></div>';
-    }).join('');
-}
-
-// ── Toast ──
-function showToast(msg, type) {
-  type = type||'info';
-  var colors = {success:'#00cc88',error:'#ef4444',warning:'#fbbf24',info:'#3b82f6'};
-  var t = document.createElement('div');
-  t.className = 'toast-notification';
-  t.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;background:var(--card);border:1px solid '+colors[type]+';border-left:3px solid '+colors[type]+';color:var(--text);font-size:12px;z-index:10000;animation:slideIn 0.3s ease;max-width:400px;font-family:Inter,sans-serif;';
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(function(){t.style.animation='slideOut 0.3s ease';setTimeout(function(){t.remove();},300);},3000);
-}
-
-// ── Init ──
-(function(){
-  var s = document.createElement('style');
-  s.textContent = '.skel-line{height:12px;background:var(--surface);border-radius:4px;margin:8px 0;animation:shimmer 1.5s infinite;}@keyframes shimmer{0%{opacity:.5;}50%{opacity:1;}100%{opacity:.5;}}.skeleton-wrap{padding:16px;}.ctx-menu{position:absolute;background:var(--card);border:1px solid var(--border);border-radius:4px;z-index:9999;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,.15);}.ctx-item{padding:8px 14px;font-size:12px;cursor:pointer;transition:background .15s;}.ctx-item:hover{background:var(--surface);}.bc-link{color:var(--accent);cursor:pointer;font-size:11px;}.bc-current{color:var(--text);font-size:11px;font-weight:600;}.bc-sep{color:var(--muted);margin:0 4px;font-size:11px;}@keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}@keyframes slideOut{from{transform:translateX(0);opacity:1;}to{transform:translateX(100%);opacity:0;}}.strategy-btn{padding:6px 12px;font-size:11px;border:1px solid var(--border);background:transparent;color:var(--text);cursor:pointer;border-radius:4px;transition:all .15s;}.strategy-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;}';
-  document.head.appendChild(s);
-  var _orig = window.updateWordCount;
-  window.updateWordCount = function(){if(_orig)_orig();updateExtendedStats();hideEmptyState();};
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',initAddons);
-  else initAddons();
-})();
-
-function initAddons() {
-  initContextMenu(); startAutoSave(); loadDraft(); loadContext(); showEmptyState();
-  updateBreadcrumb(['Home']);
-  var wc = document.querySelector('[id*="wordCount"],[class*="word-count"]');
-  if(wc && !document.getElementById('extendedStats')) {
-    var ext = document.createElement('div'); ext.id='extendedStats';
-    ext.style.cssText='margin-top:8px;padding:8px;border:1px solid var(--border);border-radius:4px;';
-    wc.parentElement.appendChild(ext);
-  }
-  if(!document.getElementById('breadcrumb')) {
-    var bc = document.createElement('div'); bc.id='breadcrumb';
-    bc.style.cssText='padding:4px 12px;font-size:11px;border-bottom:1px solid var(--border);';
-    var main = document.querySelector('main,.main,#app,body > div:first-child');
-    if(main) main.insertBefore(bc, main.firstChild);
-  }
-  checkModelStatus(); setInterval(checkModelStatus, 60000);
-  var ss = localStorage.getItem('humanizer_strategy');
-  if(ss) setStrategy(ss);
-  try{_readabilityHistory=JSON.parse(localStorage.getItem('humanizer_readability')||'[]');}catch(e){}
-  updateReadabilityChart();
-}
-
 </script>
 </body>
 </html>"""
@@ -6638,6 +7826,28 @@ class Handler(BaseHTTPRequestHandler):
                 if pre_len != post_len:
                     print(f"[{job_id}] Length adjust: {pre_len} → {post_len} (target {input_word_count})", flush=True)
 
+                # #7b Human padding — if still short, inject anti-detection content
+                current_words = len(result.split())
+                target_min = int(input_word_count * 0.90)
+                if current_words < target_min:
+                    deficit = target_min - current_words
+                    print(f"[{job_id}] Human padding: {current_words}w → target {target_min}w (+{deficit} needed)", flush=True)
+                    padding_rounds = 0
+                    while len(result.split()) < target_min and padding_rounds < 5:
+                        padding_rounds += 1
+                        # Run anti-detection injectors that ADD content
+                        result = anecdote_inject(result, tone=tone)
+                        result = opinion_inject(result, tone=tone)
+                        result = specificity_inject(result)
+                        result = quotation_inject(result)
+                        result = fragment_inject(result)
+                        result = self_correction_inject(result)
+                        new_words = len(result.split())
+                        print(f"  [padding] Round {padding_rounds}: {new_words}w", flush=True)
+                        if new_words <= current_words:
+                            break  # Not making progress
+                        current_words = new_words
+
             # #1 Selective LLM rewrite — target only high-AI sentences
             pre_selective_score = calc_detection_score(result)
             if pre_selective_score['score'] > 25:
@@ -6646,15 +7856,12 @@ class Handler(BaseHTTPRequestHandler):
                 post_selective_score = calc_detection_score(result)
                 print(f"[{job_id}] Selective rewrite: {pre_selective_score['score']} → {post_selective_score['score']}", flush=True)
 
-            # Auto-retry worst chunks (re-process entire result, not individual chunks)
+            # Auto-retry: skip full-result retry (destroys long text)
+            # Targeted sentence retry handles high scores instead
             if AUTO_RETRY:
                 score = calc_detection_score(result)
                 if score['score'] > 40:
-                    print(f"[{job_id}] Score {score['score']} > 40, retrying full result...", flush=True)
-                    result = humanize_chunk(result, passes, model or LLM_MODEL, tone)
-                    result = advanced_post_process(result, tone=tone)
-                    result = re.sub(r'  +', ' ', result)
-                    result = re.sub(r'\.\s*\.', '.', result)
+                    print(f"[{job_id}] Score {score['score']} > 40, targeted retry will handle...", flush=True)
 
             # Final: apply custom avoid + restore preserve
             result = apply_custom_avoid(result)
@@ -6663,15 +7870,15 @@ class Handler(BaseHTTPRequestHandler):
             elapsed = round(time.time() - t0, 1)
             output_score = calc_detection_score(result)
 
-            # #3 Real detection API — verify with ZeroGPT
-            zerogpt_result = None
-            if output_score['score'] > 20:  # Only check if internal score is non-trivial
-                print(f"[{job_id}] ZeroGPT verification...", flush=True)
-                zerogpt_result = zerogpt_check(result)
-                if zerogpt_result.get('score') is not None:
-                    print(f"[{job_id}] ZeroGPT: {zerogpt_result['score']}% AI (internal: {output_score['score']})", flush=True)
-                else:
-                    print(f"[{job_id}] ZeroGPT unavailable: {zerogpt_result.get('error', 'unknown')}", flush=True)
+            # Multi-detector verification (#15 GPTZero, #17 Copyleaks, #18 Sapling)
+            detector_results = None
+            if output_score['score'] > 10:
+                print(f"[{job_id}] Multi-detector verification...", flush=True)
+                detector_results = multi_detector_check(result)
+                for name, res in detector_results.get("results", {}).items():
+                    if name != "internal" and res.get("score") is not None:
+                        print(f"[{job_id}]   {name}: {res['score']}% AI", flush=True)
+                print(f"[{job_id}] Consensus: {detector_results['consensus']}% ({detector_results['detectors_used']} detectors)", flush=True)
 
             print(f"[{datetime.now().strftime('%H:%M:%S')}] Job {job_id} DONE: {input_words} -> {len(result.split())} words | Score: {JOBS[job_id]['input_score']['score']} -> {output_score['score']} ({elapsed}s)", flush=True)
 
@@ -6720,7 +7927,7 @@ class Handler(BaseHTTPRequestHandler):
                     "time": elapsed,
                     "output_words": len(result.split()),
                     "output_score": output_score,
-                    "zerogpt": zerogpt_result,
+                    "zerogpt": detector_results,
                 })
 
             # Cache result for future identical requests
