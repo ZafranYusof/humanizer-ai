@@ -22,6 +22,59 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
 from textwrap import dedent
 from datetime import datetime
+from urllib.parse import urlparse, parse_qs
+
+# ─── Feature module imports ──────────────────────────────────────────
+try:
+    from features.text_processing import (
+        apply_strength, humanize_paragraph, generate_sentence_diff,
+        passive_to_active, get_readability_scores, tone_mix,
+        formality_adjust, preserve_formatting, detect_citations,
+        detect_code_blocks, reorder_paragraphs, check_passive_voice)
+except ImportError as _e:
+    print(f"[WARN] features.text_processing not loaded: {_e}", flush=True)
+try:
+    from features.detection import (
+        detect_zerotgpt, detect_gptzero, detect_copyLeaks, multi_detect,
+        per_detector_breakdown, compare_detectors, highlight_flagged_sentences,
+        predict_score, auto_retry_until_target)
+except ImportError as _e:
+    print(f"[WARN] features.detection not loaded: {_e}", flush=True)
+try:
+    from features.models import (
+        list_custom_models, add_custom_model, remove_custom_model, model_vote,
+        temperature_call, custom_system_prompt_call, get_fallback_chain,
+        update_fallback_chain, get_api_keys, set_api_key, rotate_api_key,
+        get_model_stats)
+except ImportError as _e:
+    print(f"[WARN] features.models not loaded: {_e}", flush=True)
+try:
+    from features.history_analytics import (
+        get_job_history, search_history, get_job, delete_job,
+        bulk_delete_jobs, bulk_delete_by_date, star_job, tag_job,
+        get_starred_jobs, export_history_csv, get_usage_dashboard,
+        get_model_leaderboard, get_processing_time_chart,
+        get_word_count_distribution, get_success_rate, get_score_trend,
+        get_improvement_histogram, save_draft_to_json, load_drafts_from_json,
+        delete_draft_from_json)
+except ImportError as _e:
+    print(f"[WARN] features.history_analytics not loaded: {_e}", flush=True)
+try:
+    from features.domain_presets import (
+        get_domain_presets, apply_domain, academic_integrity_mode,
+        seo_mode, summary_mode, expand_mode, simplify_mode,
+        professional_mode, storytelling_mode, detect_language,
+        get_supported_languages)
+except ImportError as _e:
+    print(f"[WARN] features.domain_presets not loaded: {_e}", flush=True)
+try:
+    from features.quality_checks import (
+        grammar_check, spelling_check, consistency_check,
+        fact_preservation_check, tone_consistency, repetition_detector,
+        cliche_detector, run_all_checks)
+except ImportError as _e:
+    print(f"[WARN] features.quality_checks not loaded: {_e}", flush=True)
+
 
 # ─── Config ───────────────────────────────────────────────────────────
 import os
@@ -7396,6 +7449,7 @@ function initAddons() {
   updateReadabilityChart();
 }
 </script>
+<script src='/static/features.js'></script>
 </body>
 </html>"""
 
@@ -7672,8 +7726,24 @@ def _model_health_check_loop():
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         try:
-            if self.path == "/api/history":
-                self._json_response(HISTORY)
+            if self.path.startswith("/api/history/search"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(search_history(_qp.get("q", [""])[0]))
+            elif self.path == "/api/history/starred":
+                self._json_response(get_starred_jobs())
+            elif self.path == "/api/history/export-csv":
+                _csv = export_history_csv()
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv")
+                self.send_header("Content-Disposition", "attachment; filename=history.csv")
+                self.end_headers()
+                self.wfile.write(_csv.encode("utf-8") if isinstance(_csv, str) else _csv)
+                return
+            elif self.path.startswith("/api/history"):
+                _qp = parse_qs(urlparse(self.path).query)
+                _limit = int(_qp.get("limit", ["50"])[0])
+                _offset = int(_qp.get("offset", ["0"])[0])
+                self._json_response(get_job_history(limit=_limit, offset=_offset))
             elif self.path == "/api/versions":
                 versions_summary = [{"id": v["id"], "timestamp": v["timestamp"], 
                                    "input_words": v["input_words"], "output_words": v["output_words"],
@@ -7692,18 +7762,7 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/model-status":
                 self._json_response(MODEL_LATENCY if MODEL_LATENCY else {m: {"ok": True, "latency_ms": 0, "last_check": 0} for m in list(MODEL_OPTIONS.keys())[:5]})
             elif self.path == "/api/model-stats":
-                ms = STATS.get("model_scores", {})
-                result = {}
-                for mdl, data in ms.items():
-                    c = data["count"]
-                    result[mdl] = {
-                        "count": c,
-                        "avg_score_before": round(data["total_score_before"] / c, 1) if c else 0,
-                        "avg_score_after": round(data["total_score_after"] / c, 1) if c else 0,
-                        "avg_retention": round(data["total_retention"] / c, 1) if c else 0,
-                        "avg_improvement": round((data["total_score_before"] - data["total_score_after"]) / c, 1) if c else 0,
-                    }
-                self._json_response(result)
+                self._json_response(get_model_stats())
 
             elif self.path == "/api/debug-cache":
                 self._json_response({
@@ -7747,6 +7806,83 @@ class Handler(BaseHTTPRequestHandler):
                     "llm_cache_hits": _LLM_CACHE_HITS,
                     "llm_cache_misses": _LLM_CACHE_MISSES,
                 })
+            # ── Text Processing GET ──
+            elif self.path == "/api/text-processing/strength-levels":
+                self._json_response(['light', 'medium', 'aggressive'])
+            elif self.path.startswith("/api/text-processing/readability"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(get_readability_scores(_qp.get("text", [""])[0]))
+            elif self.path.startswith("/api/text-processing/citations"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(detect_citations(_qp.get("text", [""])[0]))
+            elif self.path.startswith("/api/text-processing/code-blocks"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(detect_code_blocks(_qp.get("text", [""])[0]))
+            elif self.path.startswith("/api/text-processing/passive-voice"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(check_passive_voice(_qp.get("text", [""])[0]))
+            # ── Detection GET ──
+            elif self.path.startswith("/api/detection/compare"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(compare_detectors(_qp.get("text", [""])[0]))
+            elif self.path.startswith("/api/detection/breakdown"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(per_detector_breakdown(_qp.get("text", [""])[0]))
+            elif self.path.startswith("/api/detection/predict"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(predict_score(_qp.get("text", [""])[0]))
+            # ── Models GET ──
+            elif self.path == "/api/models/list":
+                self._json_response(list_custom_models())
+            elif self.path == "/api/models/fallback-chain":
+                self._json_response(get_fallback_chain())
+            elif self.path == "/api/models/api-keys":
+                self._json_response(get_api_keys())
+            elif self.path == "/api/models/custom":
+                self._json_response(list_custom_models())
+            # ── Analytics GET ──
+            elif self.path == "/api/analytics/dashboard":
+                self._json_response(get_usage_dashboard())
+            elif self.path == "/api/analytics/leaderboard":
+                self._json_response(get_model_leaderboard())
+            elif self.path == "/api/analytics/time-chart":
+                self._json_response(get_processing_time_chart())
+            elif self.path == "/api/analytics/word-distribution":
+                self._json_response(get_word_count_distribution())
+            elif self.path == "/api/analytics/success-rate":
+                self._json_response(get_success_rate())
+            elif self.path == "/api/analytics/score-trend":
+                self._json_response(get_score_trend())
+            elif self.path == "/api/analytics/improvement":
+                self._json_response(get_improvement_histogram())
+            # ── Domains GET ──
+            elif self.path == "/api/domains":
+                self._json_response(get_domain_presets())
+            elif self.path == "/api/domains/languages":
+                self._json_response(get_supported_languages())
+            elif self.path.startswith("/api/domains/detect-language"):
+                _qp = parse_qs(urlparse(self.path).query)
+                self._json_response(detect_language(_qp.get("text", [""])[0]))
+            # ── Drafts GET ──
+            elif self.path == "/api/drafts":
+                self._json_response(load_drafts_from_json())
+            # ── Static files ──
+            elif self.path.startswith("/static/"):
+                import os
+                _fname = self.path.split("?")[0]  # strip query params
+                _fpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), _fname.lstrip("/"))
+                if os.path.isfile(_fpath):
+                    _ext = os.path.splitext(_fpath)[1].lower()
+                    _ctypes = {".js": "application/javascript", ".css": "text/css", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".json": "application/json", ".ico": "image/x-icon"}
+                    self.send_response(200)
+                    self.send_header("Content-Type", _ctypes.get(_ext, "application/octet-stream"))
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    with open(_fpath, "rb") as _f:
+                        self.wfile.write(_f.read())
+                else:
+                    self.send_response(404)
+                    self.end_headers()
             else:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -7825,6 +7961,139 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_ab_test()
             elif self.path == "/v1/humanize":
                 self._handle_dev_api()
+            # ── Text Processing POST ──
+            elif self.path == "/api/text-processing/strength":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(apply_strength(_b.get("text", ""), _b.get("level", "medium")))
+            elif self.path == "/api/text-processing/paragraph":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(humanize_paragraph(_b.get("text", ""), _b.get("paragraph", ""), _b.get("idx", 0)))
+            elif self.path == "/api/text-processing/diff":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(generate_sentence_diff(_b.get("original", ""), _b.get("humanized", "")))
+            elif self.path == "/api/text-processing/passive-to-active":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(passive_to_active(_b.get("text", "")))
+            elif self.path == "/api/text-processing/tone-mix":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(tone_mix(_b.get("text", ""), _b.get("primary", ""), _b.get("secondary", ""), _b.get("ratio", 0.5)))
+            elif self.path == "/api/text-processing/formality":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(formality_adjust(_b.get("text", ""), _b.get("level", "neutral")))
+            elif self.path == "/api/text-processing/reorder":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(reorder_paragraphs(_b.get("text", "")))
+            elif self.path == "/api/text-processing/preserve-formatting":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(preserve_formatting(_b.get("original", ""), _b.get("humanized", "")))
+            # ── Detection POST ──
+            elif self.path == "/api/detection/multi":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(multi_detect(_b.get("text", ""), _b.get("gptzero_key"), _b.get("copyleaks_email"), _b.get("copyleaks_key")))
+            elif self.path == "/api/detection/flagged":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(highlight_flagged_sentences(_b.get("text", ""), _b.get("detector_results", {})))
+            elif self.path == "/api/detection/auto-retry":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(auto_retry_until_target(_b.get("text", ""), _b.get("target_score", 20), _b.get("max_retries", 3)))
+            # ── Models POST ──
+            elif self.path == "/api/models/add":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(add_custom_model(_b.get("name", ""), _b.get("base_url", ""), _b.get("api_key", ""), _b.get("model_name", "")))
+            elif self.path == "/api/models/remove":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(remove_custom_model(_b.get("name", "")))
+            elif self.path == "/api/models/vote":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(model_vote(_b.get("text", ""), _b.get("models", [])))
+            elif self.path == "/api/models/temperature":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(temperature_call(_b.get("text", ""), _b.get("model", ""), _b.get("temperature", 0.7), _b.get("system_prompt", "")))
+            elif self.path == "/api/models/custom-prompt":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(custom_system_prompt_call(_b.get("text", ""), _b.get("model", ""), _b.get("system_prompt", "")))
+            elif self.path == "/api/models/update-chain":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(update_fallback_chain(_b.get("chain", [])))
+            elif self.path == "/api/models/set-key":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(set_api_key(_b.get("provider", ""), _b.get("key", "")))
+            elif self.path == "/api/models/rotate-key":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(rotate_api_key(_b.get("provider", "")))
+            # ── History POST ──
+            elif self.path == "/api/history/delete":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(delete_job(_b.get("id", "")))
+            elif self.path == "/api/history/bulk-delete":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(bulk_delete_jobs(_b.get("ids", [])))
+            elif self.path == "/api/history/bulk-delete-date":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(bulk_delete_by_date(_b.get("start", ""), _b.get("end", "")))
+            elif self.path == "/api/history/star":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(star_job(_b.get("id", "")))
+            elif self.path == "/api/history/tag":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(tag_job(_b.get("id", ""), _b.get("tag", "")))
+            # ── Domains POST ──
+            elif self.path == "/api/domains/apply":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(apply_domain(_b.get("text", ""), _b.get("domain_name", ""), _b.get("model")))
+            elif self.path == "/api/domains/academic":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(academic_integrity_mode(_b.get("text", "")))
+            elif self.path == "/api/domains/seo":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(seo_mode(_b.get("text", ""), _b.get("keywords", [])))
+            elif self.path == "/api/domains/summary":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(summary_mode(_b.get("text", ""), _b.get("target_words", 100)))
+            elif self.path == "/api/domains/expand":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(expand_mode(_b.get("text", ""), _b.get("target_words", 500)))
+            elif self.path == "/api/domains/simplify":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(simplify_mode(_b.get("text", "")))
+            elif self.path == "/api/domains/professional":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(professional_mode(_b.get("text", "")))
+            elif self.path == "/api/domains/storytelling":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(storytelling_mode(_b.get("text", "")))
+            # ── Quality POST ──
+            elif self.path == "/api/quality/grammar":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(grammar_check(_b.get("text", "")))
+            elif self.path == "/api/quality/spelling":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(spelling_check(_b.get("text", "")))
+            elif self.path == "/api/quality/consistency":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(consistency_check(_b.get("original", ""), _b.get("humanized", "")))
+            elif self.path == "/api/quality/facts":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(fact_preservation_check(_b.get("original", ""), _b.get("humanized", "")))
+            elif self.path == "/api/quality/tone":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(tone_consistency(_b.get("text", "")))
+            elif self.path == "/api/quality/repetition":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(repetition_detector(_b.get("text", "")))
+            elif self.path == "/api/quality/cliche":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(cliche_detector(_b.get("text", "")))
+            elif self.path == "/api/quality/all":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(run_all_checks(_b.get("original", ""), _b.get("humanized", "")))
+            # ── Drafts POST ──
+            elif self.path == "/api/drafts/save":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(save_draft_to_json(_b.get("text", ""), _b.get("name", "")))
+            elif self.path == "/api/drafts/delete":
+                _b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                self._json_response(delete_draft_from_json(_b.get("name", "")))
             else:
                 self.send_response(404)
                 self.end_headers()
