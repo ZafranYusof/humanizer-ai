@@ -159,7 +159,14 @@ def _llm_call(system_prompt, user_text, model=None):
 def apply_domain(text, domain_name, model=None):
     """Humanize text using a domain-specific system prompt via LLM."""
     presets = get_domain_presets()
-    preset = presets.get(domain_name)
+    # Case-insensitive lookup
+    preset = presets.get(domain_name) or presets.get(domain_name.capitalize()) or presets.get(domain_name.title())
+    if not preset:
+        # Try fuzzy match
+        for k in presets:
+            if k.lower() == domain_name.lower():
+                preset = presets[k]
+                break
     if not preset:
         available = ", ".join(presets.keys())
         return f"[Error: Unknown domain '{domain_name}'. Available: {available}]"

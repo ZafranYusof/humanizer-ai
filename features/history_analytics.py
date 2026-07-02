@@ -160,8 +160,13 @@ def get_starred_jobs() -> list[dict]:
 def export_history_csv() -> str:
     """Return CSV string of all jobs."""
     jobs = _load_jobs()
+    default_fields = ["id", "input_text", "output_text", "score_before", "score_after",
+                      "words_before", "words_after", "retention", "status", "model", "timestamp", "processing_time"]
     if not jobs:
-        return ""
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=default_fields, extrasaction="ignore")
+        writer.writeheader()
+        return buf.getvalue()
     # Collect all keys across jobs
     fieldnames = []
     seen = set()
@@ -311,7 +316,9 @@ def get_improvement_histogram() -> dict:
 # 18-20  DRAFTS
 # ===================================================================
 
-def save_draft_to_json(drafts: dict) -> None:
+def save_draft_to_json(text: str, name: str = "untitled") -> None:
+    drafts = _load_drafts()
+    drafts[name] = {"text": text, "saved": __import__('datetime').datetime.now().isoformat()}
     _save_drafts(drafts)
 
 

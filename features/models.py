@@ -33,7 +33,7 @@ DEFAULT_FALLBACK_CHAIN = [
     "gc/gemini-2.5-flash",
 ]
 
-_lock = threading.Lock()
+_lock = threading.RLock()  # Reentrant: allows nested locking from set_api_key etc.
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────
@@ -141,10 +141,23 @@ def remove_custom_model(name: str) -> bool:
 
 # ─── 4: Model Voting ──────────────────────────────────────────────────
 
+def _default_humanize_for_vote(text: str, model: str) -> tuple:
+    """Default humanize function for model_vote: calls LLM and returns (text, score)."""
+    messages = [
+        {"role": "system", "content": "Rewrite the following text to sound naturally human-written. Keep the meaning. Output ONLY the rewritten text."},
+        {"role": "user", "content": text},
+    ]
+    result = _llm_request(messages, model=model, temperature=0.9, timeout=60)
+    # Quick heuristic score based on text similarity
+    import difflib
+    similarity = difflib.SequenceMatcher(None, text.lower(), result.lower()).ratio()
+    score = max(0, (1 - similarity) * 100)
+    return (result, score)
+
 def model_vote(
     text: str,
     models: List[str],
-    humanize_fn: Callable[[str, str], tuple],
+    humanize_fn: Callable[[str, str], tuple] = None,
 ) -> tuple:
     """
     Run humanize on up to 3 models in parallel, pick lowest detection score.
@@ -152,6 +165,8 @@ def model_vote(
     humanize_fn(text, model) -> (humanized_text, detection_score)
     Returns (best_text, best_model, best_score).
     """
+    if humanize_fn is None:
+        humanize_fn = _default_humanize_for_vote
     candidates = models[:3]
     results = []
 
