@@ -46,7 +46,7 @@ MULTI_MODEL = False  # smart routing: use single fast model for all passes
 AUTO_RETRY = True   # re-process if score still > 40
 CHUNK_SIZE = 400    # bigger chunks = fewer chunks, better context, less overlap waste
 MIN_LENGTH_RATIO = 0.80
-PARALLEL_CHUNKS = 4  # max concurrent chunk workers
+PARALLEL_CHUNKS = 3  # max concurrent chunk workers
 HISTORY = []  # in-memory history, max 10
 # Full-result cache (same input = instant output)
 RESULT_CACHE = {}  # {key: {output, score, input_words, timestamp}}
@@ -3641,6 +3641,7 @@ STATS = {
     "error_count": 0,
     "cache_hits": 0,
     "cache_misses": 0,
+    "model_scores": {},  # {model: {count, total_score_before, total_score_after, total_retention}}
 }
 
 def update_stats(job_result):
@@ -3656,6 +3657,20 @@ def update_stats(job_result):
         STATS["error_count"] += 1
     STATS["cache_hits"] = _LLM_CACHE_HITS
     STATS["cache_misses"] = _LLM_CACHE_MISSES
+    # Per-model quality stats
+    score_before = job_result.get("score_before")
+    score_after = job_result.get("score_after")
+    input_words = job_result.get("input_words", 0)
+    output_words = job_result.get("output_words", 0)
+    if score_before is not None and score_after is not None:
+        ms = STATS["model_scores"]
+        if model not in ms:
+            ms[model] = {"count": 0, "total_score_before": 0, "total_score_after": 0, "total_retention": 0}
+        ms[model]["count"] += 1
+        ms[model]["total_score_before"] += score_before
+        ms[model]["total_score_after"] += score_after
+        if input_words > 0:
+            ms[model]["total_retention"] += round(output_words / input_words * 100, 1)
 
 # ─── Version History (Undo) ─────────────────────────────────────────
 VERSIONS = []  # [{id, timestamp, input_words, output_words, text, score}]
@@ -5143,12 +5158,41 @@ HTML = r"""<!DOCTYPE html>
     --shadow: 0 2px 8px rgba(26,22,18,0.08);
     --shadow-lg: 0 8px 24px rgba(26,22,18,0.12);
     --radius: 2px;
+    /* Dark mode mapped vars */
+    --bg-primary: var(--paper);
+    --bg-secondary: var(--paper-warm);
+    --text-primary: var(--ink);
+    --text-secondary: var(--ink-muted);
+  }
+
+  /* Dark theme on html.dark */
+  html.dark {
+    --bg-primary: #1a1a1a;
+    --bg-secondary: #222;
+    --text-primary: #e5e5e5;
+    --text-secondary: #999;
+    --border: #333;
+    --border-light: #2a2a2a;
+    --accent: #f97316;
+    --accent-hover: #fb923c;
+    --accent-light: rgba(249,115,22,0.15);
+    --ink: #e5e5e5;
+    --ink-light: #ccc;
+    --ink-muted: #999;
+    --paper: #1a1a1a;
+    --paper-warm: #222;
+    --paper-dark: #2a2a2a;
+    --success: #4ade80;
+    --error: #f87171;
+    --warning: #fbbf24;
+    --shadow: 0 2px 8px rgba(0,0,0,0.3);
+    --shadow-lg: 0 8px 24px rgba(0,0,0,0.4);
   }
 
   body {
     font-family: 'Lora', Georgia, 'Times New Roman', serif;
-    background: var(--paper);
-    color: var(--ink);
+    background: var(--bg-primary);
+    color: var(--text-primary);
     min-height: 100vh;
     background-image:
       repeating-linear-gradient(0deg, transparent, transparent 27px, rgba(0,0,0,0.02) 27px, rgba(0,0,0,0.02) 28px);
@@ -5156,21 +5200,68 @@ HTML = r"""<!DOCTYPE html>
     line-height: 1.6;
   }
 
-  /* Dark mode - old manuscript */
-  body.dark {
-    --ink: #e8e0d4;
-    --ink-light: #c8baa8;
-    --ink-muted: #8b7e6f;
-    --paper: #1a1612;
-    --paper-warm: #241f1a;
-    --paper-dark: #2e2822;
-    --border: #3d352c;
-    --border-light: #2e2822;
-    --accent: #d4764e;
-    --accent-hover: #e08a64;
-    --accent-light: rgba(212,118,78,0.15);
+  html.dark body {
     background-image:
       repeating-linear-gradient(0deg, transparent, transparent 27px, rgba(255,255,255,0.015) 27px, rgba(255,255,255,0.015) 28px);
+  }
+
+  /* Compare View - word-level diff */
+  .compare-container {
+    display: none;
+    margin: 16px 0;
+    border: 1px solid var(--border);
+    background: var(--paper);
+  }
+  .compare-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--ink-muted);
+  }
+  .compare-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+  }
+  .compare-col {
+    padding: 16px;
+    font-size: 14px;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+  }
+  .compare-col:first-child {
+    border-right: 1px solid var(--border);
+  }
+  .compare-col-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--ink-muted);
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-light);
+  }
+  .diff-word-removed {
+    background: rgba(255,0,0,0.15);
+    text-decoration: line-through;
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .diff-word-added {
+    background: rgba(0,255,0,0.15);
+    border-radius: 2px;
+    padding: 0 1px;
+  }
+  .diff-word-unchanged {
+    /* no special styling */
   }
 
   /* Typewriter elements */
@@ -5556,8 +5647,9 @@ HTML = r"""<!DOCTYPE html>
   <div class="masthead-subtitle">Multi-pass text humanizer &mdash; bypass AI detection</div>
   <div class="masthead-rule"></div>
   <div class="masthead-controls">
-    <button class="btn btn-ghost" onclick="toggleTheme()" title="Toggle theme">
-      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.76 2.76l1.41 1.41M9.83 9.83l1.41 1.41M2.76 11.24l1.41-1.41M9.83 4.17l1.41-1.41" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+    <button class="btn btn-ghost" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme">
+      <svg id="themeSunIcon" width="14" height="14" viewBox="0 0 14 14" fill="none" style="display:none;"><circle cx="7" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M2.76 2.76l1.41 1.41M9.83 9.83l1.41 1.41M2.76 11.24l1.41-1.41M9.83 4.17l1.41-1.41" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      <svg id="themeMoonIcon" width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M12 8.5A5.5 5.5 0 015.5 2 5.5 5.5 0 1012 8.5z" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
     <button class="btn" onclick="showSettings()">Settings</button>
   </div>
@@ -5632,6 +5724,7 @@ HTML = r"""<!DOCTYPE html>
       <div class="editor-head">
         <span>Output</span>
         <div class="editor-actions">
+          <button class="btn btn-sm btn-ghost" id="compareBtn" onclick="toggleCompareView()" title="Side-by-side compare">Compare</button>
           <button class="btn btn-sm btn-ghost" onclick="copyOutput()">Copy</button>
           <button class="btn btn-sm btn-ghost" onclick="downloadDocx()">DOCX</button>
         </div>
@@ -5644,6 +5737,24 @@ HTML = r"""<!DOCTYPE html>
       <div class="editor-foot">
         <span id="outputWords">0 words</span>
         <span id="outputScore">Score: --</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compare View (side-by-side diff) -->
+  <div class="compare-container" id="compareContainer">
+    <div class="compare-header">
+      <span>Compare View — Word-level Diff</span>
+      <button class="btn btn-sm btn-ghost" onclick="toggleCompareView()">Close</button>
+    </div>
+    <div class="compare-columns">
+      <div class="compare-col">
+        <div class="compare-col-label">Original Input</div>
+        <div id="compareOriginal"></div>
+      </div>
+      <div class="compare-col">
+        <div class="compare-col-label">Humanized Output</div>
+        <div id="compareHumanized"></div>
       </div>
     </div>
   </div>
@@ -5888,6 +5999,7 @@ async function loadFromHistory(id) {
 async function humanize() {
   const input = document.getElementById('input').value.trim();
   if (!input) { alert('Paste some text first'); return; }
+  originalText = input; // Store for compare view
   const wc = input.split(/\s+/).length;
   if(wc > 5000) {
     showToast('Text has '+wc+' words. Processing may take '+Math.round(wc/30)+' seconds. Consider splitting into smaller chunks.', 'warning');
@@ -6100,8 +6212,9 @@ function showDiff(original, humanized) {
   const origSentences = original.match(/[^.!?]+[.!?]+/g) || [original];
   const humanSentences = humanized.match(/[^.!?]+[.!?]+/g) || [humanized];
   const diffBody = document.getElementById('diffBody');
+  if (!diffBody) return;
   const container = document.getElementById('diffContainer');
-  container.style.display = 'block';
+  if (container) container.style.display = 'block';
 
   let html = '';
   const maxLen = Math.max(origSentences.length, humanSentences.length);
@@ -6116,6 +6229,67 @@ function showDiff(original, humanized) {
     }
   }
   diffBody.innerHTML = html;
+
+  // Also update compare view with word-level diff
+  updateCompareView(original, humanized);
+}
+
+// Word-level diff using LCS-style matching (like difflib.SequenceMatcher)
+function wordDiffHTML(origWords, newWords) {
+  // Build LCS table
+  var m = origWords.length, n = newWords.length;
+  var dp = [];
+  for (var i = 0; i <= m; i++) { dp[i] = []; for (var j = 0; j <= n; j++) dp[i][j] = 0; }
+  for (var i = 1; i <= m; i++) {
+    for (var j = 1; j <= n; j++) {
+      if (origWords[i-1].toLowerCase() === newWords[j-1].toLowerCase()) dp[i][j] = dp[i-1][j-1] + 1;
+      else dp[i][j] = Math.max(dp[i-1][j], dp[i][j-1]);
+    }
+  }
+  // Backtrack to find matching
+  var origSpans = [], newSpans = [];
+  var oi = m, nj = n;
+  var origTags = new Array(m), newTags = new Array(n);
+  for (var i = 0; i < m; i++) origTags[i] = 'removed';
+  for (var j = 0; j < n; j++) newTags[j] = 'added';
+  while (oi > 0 && nj > 0) {
+    if (origWords[oi-1].toLowerCase() === newWords[nj-1].toLowerCase()) {
+      origTags[oi-1] = 'unchanged';
+      newTags[nj-1] = 'unchanged';
+      oi--; nj--;
+    } else if (dp[oi-1][nj] >= dp[oi][nj-1]) oi--;
+    else nj--;
+  }
+  var origHTML = origWords.map(function(w, i) {
+    return '<span class="diff-word-' + origTags[i] + '">' + escapeHtml(w) + '</span>';
+  }).join(' ');
+  var newHTML = newWords.map(function(w, j) {
+    return '<span class="diff-word-' + newTags[j] + '">' + escapeHtml(w) + '</span>';
+  }).join(' ');
+  return {orig: origHTML, new: newHTML};
+}
+
+function updateCompareView(original, humanized) {
+  var origEl = document.getElementById('compareOriginal');
+  var humEl = document.getElementById('compareHumanized');
+  if (!origEl || !humEl) return;
+  var origWords = original.split(/\s+/);
+  var humWords = humanized.split(/\s+/);
+  var diff = wordDiffHTML(origWords, humWords);
+  origEl.innerHTML = diff.orig;
+  humEl.innerHTML = diff.new;
+}
+
+function toggleCompareView() {
+  var container = document.getElementById('compareContainer');
+  if (!container) return;
+  var visible = container.style.display === 'block';
+  container.style.display = visible ? 'none' : 'block';
+  if (!visible) {
+    var orig = originalText || document.getElementById('input').value;
+    var hum = document.getElementById('output').value;
+    if (orig && hum) updateCompareView(orig, hum);
+  }
 }
 
 function toggleDiff() {
@@ -6201,14 +6375,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 // Theme toggle
-let darkMode = true;
+let darkMode = localStorage.getItem('darkMode') !== 'false'; // default dark
 function toggleSidebar() {
   document.getElementById('sidebar').classList.toggle('collapsed');
 }
-function toggleTheme() {
-  darkMode = !darkMode;
-  document.body.classList.toggle('light-mode', !darkMode);
+function applyTheme(dark) {
+  document.documentElement.classList.toggle('dark', dark);
+  var sun = document.getElementById('themeSunIcon');
+  var moon = document.getElementById('themeMoonIcon');
+  if (sun) sun.style.display = dark ? 'none' : 'block';
+  if (moon) moon.style.display = dark ? 'block' : 'none';
+  darkMode = dark;
+  localStorage.setItem('darkMode', dark);
 }
+function toggleTheme() {
+  applyTheme(!darkMode);
+}
+// Apply saved theme on load
+applyTheme(darkMode);
 
 // Stats panel
 function showStatsTab() {
@@ -6236,6 +6420,56 @@ async function loadStats() {
 }
 
 // Custom word lists
+
+function showSettings() {
+  togglePanel('settingsPanel');
+  var content = document.getElementById('settingsPanel_content');
+  if (!content) return;
+  content.innerHTML = '<div style="margin-bottom:16px;">' +
+    '<h4 style="font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Model Performance</h4>' +
+    '<div id="modelPerfTable">Loading...</div></div>' +
+    '<div style="margin-bottom:16px;">' +
+    '<h4 style="font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Detection Score Weights</h4>' +
+    '<div style="font-size:13px;color:var(--text-secondary);line-height:1.6;">' +
+    '<div>Sentence burstiness: <b>25%</b></div>' +
+    '<div>Vocabulary diversity: <b>20%</b></div>' +
+    '<div>AI phrase detection: <b>20%</b></div>' +
+    '<div>Syntax patterns: <b>15%</b></div>' +
+    '<div>Personal voice: <b>10%</b></div>' +
+    '<div>Imperfections: <b>10%</b></div>' +
+    '</div></div>' +
+    '<div><h4 style="font-size:12px;text-transform:uppercase;letter-spacing:1px;margin-bottom:8px;">Cache Stats</h4>' +
+    '<div id="cacheStatsDiv">Loading...</div></div>';
+  fetch('/api/model-stats').then(function(r){return r.json();}).then(function(data) {
+    var rows = '';
+    var best = null, bestScore = -999;
+    for (var m in data) { if (data[m].avg_improvement > bestScore) { bestScore = data[m].avg_improvement; best = m; } }
+    for (var m in data) {
+      var d = data[m];
+      var bg = m === best ? 'background:rgba(74,124,89,0.15);' : '';
+      rows += '<tr style="'+bg+'"><td style="padding:4px 8px;font-size:12px;">'+m+'</td>' +
+        '<td style="padding:4px 8px;text-align:center;">'+d.count+'</td>' +
+        '<td style="padding:4px 8px;text-align:center;">'+d.avg_score_before+'</td>' +
+        '<td style="padding:4px 8px;text-align:center;">'+d.avg_score_after+'</td>' +
+        '<td style="padding:4px 8px;text-align:center;color:var(--success);">'+d.avg_retention+'%</td>' +
+        '<td style="padding:4px 8px;text-align:center;font-weight:600;">-'+d.avg_improvement+'</td></tr>';
+    }
+    var tbl = '<table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="border-bottom:1px solid var(--border);">' +
+      '<th style="padding:4px 8px;text-align:left;">Model</th><th style="padding:4px 8px;">Uses</th><th style="padding:4px 8px;">Before</th>' +
+      '<th style="padding:4px 8px;">After</th><th style="padding:4px 8px;">Retention</th><th style="padding:4px 8px;">Improvement</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6" style="padding:8px;text-align:center;color:var(--text-secondary);">No data yet</td></tr>') + '</tbody></table>';
+    document.getElementById('modelPerfTable').innerHTML = tbl;
+  }).catch(function(){ document.getElementById('modelPerfTable').innerHTML = '<span style="color:var(--text-secondary);">Failed to load</span>'; });
+  fetch('/api/debug-cache').then(function(r){return r.json();}).then(function(data) {
+    document.getElementById('cacheStatsDiv').innerHTML = '<div style="font-size:13px;">Cache size: <b>'+data.cache_size+'</b> | Hits: <b>'+data.cache_hits+'</b> | Misses: <b>'+data.cache_misses+'</b></div>';
+  }).catch(function(){});
+}
+
+function loadSettings() {
+  var dark = localStorage.getItem('humanizer_dark');
+  if (dark === 'true') applyTheme(true);
+}
+
 function showCustomLists() {
   const panel = document.getElementById('customListsPanel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
@@ -7387,147 +7621,205 @@ MODEL_FALLBACK = [
 
 # ── Model Status ──
 MODEL_LATENCY = {}
+MODEL_FAIL_COUNTS = {}  # consecutive failure count per model
+MODEL_HEALTHY = set()   # models currently considered healthy
 
 def update_model_latency(model, latency_ms, ok=True):
     MODEL_LATENCY[model] = {"ok": ok, "latency_ms": round(latency_ms), "last_check": time.time()}
+    if ok:
+        MODEL_FAIL_COUNTS[model] = 0
+        MODEL_HEALTHY.add(model)
+    else:
+        MODEL_FAIL_COUNTS[model] = MODEL_FAIL_COUNTS.get(model, 0) + 1
+
+def _model_health_check_loop():
+    """Background thread: ping each model every 5 min. Remove failing models from fallback chain."""
+    global MODEL_FALLBACK_CHAIN, MODEL_FALLBACK
+    # Initialize: all models start healthy
+    for m in list(MODEL_FALLBACK) + list(MODEL_FALLBACK_CHAIN):
+        MODEL_HEALTHY.add(m)
+    while True:
+        time.sleep(300)  # every 5 minutes
+        all_models = list(set(list(MODEL_FALLBACK) + list(MODEL_FALLBACK_CHAIN)))
+        for model in all_models:
+            t0 = time.time()
+            try:
+                resp = llm_call("Say OK", model=model, temperature=0.1)
+                latency = (time.time() - t0) * 1000
+                ok = bool(resp and len(resp.strip()) > 0)
+                update_model_latency(model, latency, ok=ok)
+                if not ok:
+                    print(f"[HEALTH] {model}: empty response", flush=True)
+            except Exception as e:
+                latency = (time.time() - t0) * 1000
+                update_model_latency(model, latency, ok=False)
+                print(f"[HEALTH] {model}: FAIL ({e}), consecutive={MODEL_FAIL_COUNTS.get(model, 0)}", flush=True)
+            # 3 consecutive failures → remove from fallback chain
+            if MODEL_FAIL_COUNTS.get(model, 0) >= 3:
+                if model in MODEL_FALLBACK_CHAIN:
+                    MODEL_FALLBACK_CHAIN = [m for m in MODEL_FALLBACK_CHAIN if m != model]
+                    print(f"[HEALTH] {model}: REMOVED from fallback chain (3 failures)", flush=True)
+            # If healthy and was previously removed, re-add
+            elif model in MODEL_HEALTHY and model not in MODEL_FALLBACK_CHAIN:
+                if model in MODEL_FALLBACK:
+                    MODEL_FALLBACK_CHAIN.append(model)
+                    print(f"[HEALTH] {model}: RE-ADDED to fallback chain", flush=True)
 
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        if self.path == "/api/history":
-            self._json_response(HISTORY)
-        elif self.path == "/api/versions":
-            versions_summary = [{"id": v["id"], "timestamp": v["timestamp"], 
-                               "input_words": v["input_words"], "output_words": v["output_words"],
-                               "score": v["score"], "model": v["model"], "tone": v["tone"]}
-                              for v in VERSIONS]
-            self._json_response(versions_summary)
-        elif self.path.startswith("/api/version/"):
-            vid = int(self.path.split("/")[-1])
-            version = next((v for v in VERSIONS if v["id"] == vid), None)
-            if version:
-                self._json_response(version)
+        try:
+            if self.path == "/api/history":
+                self._json_response(HISTORY)
+            elif self.path == "/api/versions":
+                versions_summary = [{"id": v["id"], "timestamp": v["timestamp"], 
+                                   "input_words": v["input_words"], "output_words": v["output_words"],
+                                   "score": v["score"], "model": v["model"], "tone": v["tone"]}
+                                  for v in VERSIONS]
+                self._json_response(versions_summary)
+            elif self.path.startswith("/api/version/"):
+                vid = int(self.path.split("/")[-1])
+                version = next((v for v in VERSIONS if v["id"] == vid), None)
+                if version:
+                    self._json_response(version)
+                else:
+                    self._json_response({"error": "Version not found"}, 404)
+            elif self.path == "/api/stats":
+                self._json_response(STATS)
+            elif self.path == "/api/model-status":
+                self._json_response(MODEL_LATENCY if MODEL_LATENCY else {m: {"ok": True, "latency_ms": 0, "last_check": 0} for m in list(MODEL_OPTIONS.keys())[:5]})
+            elif self.path == "/api/debug-cache":
+                self._json_response({
+                    "cache_size": len(_LLM_CACHE),
+                    "cache_hits": _LLM_CACHE_HITS,
+                    "cache_misses": _LLM_CACHE_MISSES,
+                    "cache_keys": list(_LLM_CACHE.keys())[:5]
+                })
+            elif self.path.startswith("/api/progress/"):
+                job_id = self.path.split("/api/progress/")[-1]
+                with JOBS_LOCK:
+                    job = JOBS.get(job_id)
+                if job:
+                    # Add time estimation to progress response
+                    if job["status"] == "processing":
+                        elapsed = time.time() - job.get("start_time", time.time())
+                        model = job.get("model", LLM_MODEL)
+                        time_est = estimate_time_remaining(
+                            job.get("input_words", 0),
+                            job.get("chunks_total", 1),
+                            job.get("chunks_done", 0),
+                            elapsed,
+                            model=model,
+                        )
+                        job["time_estimate"] = time_est
+                        job["time_remaining_text"] = format_time_remaining(time_est["remaining_seconds"])
+                    self._json_response(job)
+                else:
+                    self._json_response({"error": "Job not found"}, 404)
+            elif self.path == "/api/keys/list":
+                self._json_response(list_api_keys())
+            elif self.path == "/api/webhooks/list":
+                self._json_response(list_webhooks())
+            elif self.path == "/api/style/profiles":
+                profiles = [{"id": p["id"], "stats": p["stats"], "created": p["created"]} for p in _STYLE_PROFILES.values()]
+                self._json_response(profiles)
+            elif self.path == "/api/cache/stats":
+                self._json_response({
+                    "full_text_cache_size": len(_FULL_TEXT_CACHE),
+                    "llm_cache_size": len(_LLM_CACHE),
+                    "llm_cache_hits": _LLM_CACHE_HITS,
+                    "llm_cache_misses": _LLM_CACHE_MISSES,
+                })
             else:
-                self._json_response({"error": "Version not found"}, 404)
-        elif self.path == "/api/stats":
-            self._json_response(STATS)
-        elif self.path == "/api/model-status":
-            self._json_response(MODEL_LATENCY if MODEL_LATENCY else {m: {"ok": True, "latency_ms": 0, "last_check": 0} for m in list(MODEL_OPTIONS.keys())[:5]})
-        elif self.path == "/api/debug-cache":
-            self._json_response({
-                "cache_size": len(_LLM_CACHE),
-                "cache_hits": _LLM_CACHE_HITS,
-                "cache_misses": _LLM_CACHE_MISSES,
-                "cache_keys": list(_LLM_CACHE.keys())[:5]
-            })
-        elif self.path.startswith("/api/progress/"):
-            job_id = self.path.split("/api/progress/")[-1]
-            with JOBS_LOCK:
-                job = JOBS.get(job_id)
-            if job:
-                # Add time estimation to progress response
-                if job["status"] == "processing":
-                    elapsed = time.time() - job.get("start_time", time.time())
-                    model = job.get("model", LLM_MODEL)
-                    time_est = estimate_time_remaining(
-                        job.get("input_words", 0),
-                        job.get("chunks_total", 1),
-                        job.get("chunks_done", 0),
-                        elapsed,
-                        model=model,
-                    )
-                    job["time_estimate"] = time_est
-                    job["time_remaining_text"] = format_time_remaining(time_est["remaining_seconds"])
-                self._json_response(job)
-            else:
-                self._json_response({"error": "Job not found"}, 404)
-        elif self.path == "/api/keys/list":
-            self._json_response(list_api_keys())
-        elif self.path == "/api/webhooks/list":
-            self._json_response(list_webhooks())
-        elif self.path == "/api/style/profiles":
-            profiles = [{"id": p["id"], "stats": p["stats"], "created": p["created"]} for p in _STYLE_PROFILES.values()]
-            self._json_response(profiles)
-        elif self.path == "/api/cache/stats":
-            self._json_response({
-                "full_text_cache_size": len(_FULL_TEXT_CACHE),
-                "llm_cache_size": len(_LLM_CACHE),
-                "llm_cache_hits": _LLM_CACHE_HITS,
-                "llm_cache_misses": _LLM_CACHE_MISSES,
-            })
-        else:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.end_headers()
-            self.wfile.write(HTML.encode("utf-8"))
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(HTML.encode("utf-8"))
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[CRASH] do_GET {self.path}: {tb}", flush=True)
+            try:
+                self._json_response({"error": str(e)}, 500)
+            except Exception:
+                pass
 
     def do_POST(self):
-        if self.path == "/api/humanize":
-            self._handle_humanize_async()
-        elif self.path == "/api/analyze":
-            self._handle_analyze()
-        elif self.path == "/api/upload":
-            self._handle_upload()
-        elif self.path == "/api/download":
-            self._handle_download()
-        elif self.path == "/api/download/txt":
-            self._handle_download_txt()
-        elif self.path == "/api/download/md":
-            self._handle_download_md()
-        elif self.path == "/api/voice-check":
-            self._handle_voice_check()
-        elif self.path == "/api/similarity":
-            self._handle_similarity()
-        elif self.path == "/api/citation-format":
-            self._handle_citation_format()
-        elif self.path == "/api/grammar-fix":
-            self._handle_grammar_fix()
-        elif self.path == "/api/keywords":
-            self._handle_keywords()
-        elif self.path == "/api/batch":
-            self._handle_batch()
-        elif self.path == "/api/preview":
-            self._handle_preview()
-        elif self.path == "/api/custom-lists":
-            self._handle_custom_lists()
-        elif self.path == "/api/external-check":
-            self._handle_external_check()
-        elif self.path == "/api/readability":
-            self._handle_readability()
-        elif self.path == "/api/grammar":
-            self._handle_grammar()
-        elif self.path == "/api/variants":
-            self._handle_variants()
-        elif self.path == "/api/tone-slider":
-            self._handle_tone_slider()
-        elif self.path == "/api/style-train":
-            self._handle_style_train()
-        elif self.path == "/api/docs":
-            self._handle_api_docs()
-        elif self.path == "/api/webhook/register":
-            self._handle_webhook_register()
-        elif self.path == "/api/webhook/delete":
-            self._handle_webhook_delete()
-        elif self.path == "/api/style/train":
-            self._handle_style_train()
-        elif self.path == "/api/style/analyze":
-            self._handle_style_analyze()
-        elif self.path == "/api/keys/generate":
-            self._handle_key_generate()
-        elif self.path == "/api/keys/revoke":
-            self._handle_key_revoke()
-        elif self.path == "/api/webhooks/register":
-            self._handle_webhook_register()
-        elif self.path == "/api/webhooks/delete":
-            self._handle_webhook_delete()
-        elif self.path == "/api/ab-test":
-            self._handle_ab_test()
-        elif self.path == "/v1/humanize":
-            self._handle_dev_api()
-        else:
-            self.send_response(404)
-            self.end_headers()
+        try:
+            if self.path == "/api/humanize":
+                self._handle_humanize_async()
+            elif self.path == "/api/analyze":
+                self._handle_analyze()
+            elif self.path == "/api/upload":
+                self._handle_upload()
+            elif self.path == "/api/download":
+                self._handle_download()
+            elif self.path == "/api/download/txt":
+                self._handle_download_txt()
+            elif self.path == "/api/download/md":
+                self._handle_download_md()
+            elif self.path == "/api/voice-check":
+                self._handle_voice_check()
+            elif self.path == "/api/similarity":
+                self._handle_similarity()
+            elif self.path == "/api/citation-format":
+                self._handle_citation_format()
+            elif self.path == "/api/grammar-fix":
+                self._handle_grammar_fix()
+            elif self.path == "/api/keywords":
+                self._handle_keywords()
+            elif self.path == "/api/batch":
+                self._handle_batch()
+            elif self.path == "/api/preview":
+                self._handle_preview()
+            elif self.path == "/api/custom-lists":
+                self._handle_custom_lists()
+            elif self.path == "/api/external-check":
+                self._handle_external_check()
+            elif self.path == "/api/readability":
+                self._handle_readability()
+            elif self.path == "/api/grammar":
+                self._handle_grammar()
+            elif self.path == "/api/variants":
+                self._handle_variants()
+            elif self.path == "/api/tone-slider":
+                self._handle_tone_slider()
+            elif self.path == "/api/style-train":
+                self._handle_style_train()
+            elif self.path == "/api/docs":
+                self._handle_api_docs()
+            elif self.path == "/api/webhook/register":
+                self._handle_webhook_register()
+            elif self.path == "/api/webhook/delete":
+                self._handle_webhook_delete()
+            elif self.path == "/api/style/train":
+                self._handle_style_train()
+            elif self.path == "/api/style/analyze":
+                self._handle_style_analyze()
+            elif self.path == "/api/keys/generate":
+                self._handle_key_generate()
+            elif self.path == "/api/keys/revoke":
+                self._handle_key_revoke()
+            elif self.path == "/api/webhooks/register":
+                self._handle_webhook_register()
+            elif self.path == "/api/webhooks/delete":
+                self._handle_webhook_delete()
+            elif self.path == "/api/ab-test":
+                self._handle_ab_test()
+            elif self.path == "/v1/humanize":
+                self._handle_dev_api()
+            else:
+                self.send_response(404)
+                self.end_headers()
+        except Exception as e:
+            import traceback
+            tb = traceback.format_exc()
+            print(f"[CRASH] do_POST {self.path}: {tb}", flush=True)
+            try:
+                self._json_response({"error": str(e), "traceback": tb[-500:]}, 500)
+            except Exception:
+                pass  # Response already sent
 
     def _handle_humanize_async(self):
         """Start humanization in background thread, return job_id immediately."""
@@ -7612,15 +7904,14 @@ class Handler(BaseHTTPRequestHandler):
     def _run_humanize_job(self, job_id, text, passes, model, tone, domain="general", ref_sample="", auto_retry=False, strict_wc=False):
         """Run full humanization in background, updating JOBS dict progressively."""
         t0 = time.time()
-        # Preprocessing pipeline
-        text = auto_fix_grammar(text)  # #5: grammar fix
-        text, cite_placeholders = preserve_citations(text)  # #8: protect citations
-        text, block_placeholders = protect_special_blocks(text)  # #9: protect code/tables/math
-        input_words = len(text.split())
-        model_label = model or LLM_MODEL
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Job {job_id}: {input_words} words, {passes} passes, model={model_label}, tone={tone}", flush=True)
-
         try:
+            # Preprocessing pipeline
+            text = auto_fix_grammar(text)  # #5: grammar fix
+            text, cite_placeholders = preserve_citations(text)  # #8: protect citations
+            text, block_placeholders = protect_special_blocks(text)  # #9: protect code/tables/math
+            input_words = len(text.split())
+            model_label = model or LLM_MODEL
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Job {job_id}: {input_words} words, {passes} passes, model={model_label}, tone={tone}", flush=True)
             if input_words <= 300:
                 # Short text: single chunk
                 result = humanize_chunk(text, passes, model or LLM_MODEL, tone)
@@ -7639,13 +7930,39 @@ class Handler(BaseHTTPRequestHandler):
                 similarity = calc_semantic_similarity(text, result)  # #13: semantic similarity
 
                 # Strict word count enforcement (±5%)
-                # strict_wc is a parameter
                 if strict_wc and input_words > 0:
                     out_words = len(result.split())
                     ratio = out_words / input_words
-                    if ratio < 0.95 or ratio > 1.05:
-                        # Re-process problematic chunks
-                        result = humanize_chunk(result, 1, model, tone)
+                    max_attempts = 3
+                    attempt = 0
+                    while (ratio < 0.95 or ratio > 1.05) and attempt < max_attempts:
+                        attempt += 1
+                        if ratio < 0.95:
+                            # Too short — send to LLM with expansion prompt
+                            target_min = int(input_words * 0.96)
+                            deficit = target_min - out_words
+                            expand_prompt = (
+                                f"Expand the following text to approximately {target_min} words "
+                                f"(currently {out_words} words, need +{deficit}). "
+                                f"Add relevant detail, examples, or elaboration. "
+                                f"Do NOT change the meaning. Keep the same tone and style.\n\n"
+                                f"Text:\n{result}"
+                            )
+                            expanded = llm_call(expand_prompt, model=model, temperature=0.7)
+                            if expanded and len(expanded.split()) > out_words:
+                                result = expanded
+                        else:
+                            # Too long — trim least important sentences
+                            target_max = int(input_words * 1.04)
+                            sents = re.split(r'(?<=[.!?])\s+', result.strip())
+                            while len(' '.join(sents).split()) > target_max and len(sents) > 3:
+                                # Remove last sentence (usually least critical)
+                                sents.pop()
+                            result = ' '.join(sents)
+                        out_words = len(result.split())
+                        ratio = out_words / input_words
+                    if attempt > 0:
+                        print(f"[{job_id}] Strict WC: {attempt} adjustments, final {out_words}w (target ~{input_words}w, ratio {ratio:.2f})", flush=True)
                 
                 with JOBS_LOCK:
                 
@@ -7676,8 +7993,8 @@ class Handler(BaseHTTPRequestHandler):
                 save_version({
                     "id": len(VERSIONS) + 1,
                     "timestamp": datetime.now().isoformat(),
-                    "input": text[:500],
-                    "output": result,
+                    "input_text": text[:500],
+                    "output_text": result,
                     "input_words": input_words,
                     "output_words": len(result.split()),
                     "score": output_score["score"],
@@ -7820,8 +8137,9 @@ class Handler(BaseHTTPRequestHandler):
             # #7 Length-preserving — match input word count ±5%
             input_word_count = len(text.split())
             if input_word_count > 100:
+                wc_tolerance = 0.02 if strict_wc else 0.05
                 pre_len = len(result.split())
-                result = length_preserving_adjust(result, input_word_count, tolerance=0.05)
+                result = length_preserving_adjust(result, input_word_count, tolerance=wc_tolerance)
                 post_len = len(result.split())
                 if pre_len != post_len:
                     print(f"[{job_id}] Length adjust: {pre_len} → {post_len} (target {input_word_count})", flush=True)
@@ -8642,6 +8960,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run_server(port=7860):
+    # Start model health check background thread
+    health_thread = threading.Thread(target=_model_health_check_loop, daemon=True)
+    health_thread.start()
+    print(f"[HEALTH] Model health checker started (every 5 min)", flush=True)
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     print(f"HumanizeAI v3 running at http://localhost:{port}", flush=True)
     print("Press Ctrl+C to stop", flush=True)
