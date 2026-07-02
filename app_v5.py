@@ -7689,6 +7689,20 @@ class Handler(BaseHTTPRequestHandler):
                 self._json_response(STATS)
             elif self.path == "/api/model-status":
                 self._json_response(MODEL_LATENCY if MODEL_LATENCY else {m: {"ok": True, "latency_ms": 0, "last_check": 0} for m in list(MODEL_OPTIONS.keys())[:5]})
+            elif self.path == "/api/model-stats":
+                ms = STATS.get("model_scores", {})
+                result = {}
+                for mdl, data in ms.items():
+                    c = data["count"]
+                    result[mdl] = {
+                        "count": c,
+                        "avg_score_before": round(data["total_score_before"] / c, 1) if c else 0,
+                        "avg_score_after": round(data["total_score_after"] / c, 1) if c else 0,
+                        "avg_retention": round(data["total_retention"] / c, 1) if c else 0,
+                        "avg_improvement": round((data["total_score_before"] - data["total_score_after"]) / c, 1) if c else 0,
+                    }
+                self._json_response(result)
+
             elif self.path == "/api/debug-cache":
                 self._json_response({
                     "cache_size": len(_LLM_CACHE),
