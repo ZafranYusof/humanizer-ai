@@ -6116,6 +6116,8 @@ async function humanize() {
           const scoreColor = (g) => g && g.includes('HUMAN') ? '#00cc88' : g === 'MIXED' ? '#ffaa00' : '#ff4444';
 
           showToast('Humanization complete!', 'success');
+          document.getElementById('outputScore').textContent = 'Score: ' + (inScore.score||'?') + '% -> ' + (outScore.score||'?') + '% (' + outGrade + ')';
+          document.getElementById('outputWords').textContent = (prog.output_words || 0) + ' words';
     status.innerHTML = 'Done in ' + (prog.time || '?') + 's';
           document.getElementById('stats').innerHTML =
             '<div><div class="stat-value">' + (prog.input_words || 0) + '</div><div class="stat-label">Input Words</div></div>' +
